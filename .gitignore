@@ -1,0 +1,31 @@
+# IDEs / editors
+.vscode/
+.idea/
+*.iml
+*.swp
+*.swo
+*~
+.fleet/
+.zed/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies / build
+node_modules/
+dist/
+build/
+out/
+coverage/
+target/
+*.log
+
+# Claude Code local settings
+.claude/settings.local.json

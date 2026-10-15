@@ -1,8 +1,9 @@
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
-import { markdown } from '@codemirror/lang-markdown'
+import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import type { Api } from '../preload/index.ts'
 import { createExplorer, movePath } from './explorer.ts'
+import { livePreview } from './livePreview.ts'
 
 declare global {
   interface Window {
@@ -25,7 +26,8 @@ function createEditor(pane: HTMLElement) {
   }
   const extensions = [
     basicSetup,
-    markdown(),
+    markdown({ base: markdownLanguage }),
+    livePreview(),
     EditorView.lineWrapping,
     EditorView.updateListener.of((u) => {
       if (!u.docChanged) return

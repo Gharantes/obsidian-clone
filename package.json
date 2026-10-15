@@ -1,0 +1,24 @@
+{
+  "name": "obsidian-clone",
+  "version": "0.0.1",
+  "private": true,
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit",
+    "postinstall": "install-electron"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "electron": "^44.7.2",
+    "electron-vite": "^6.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.4"
+  },
+  "dependencies": {
+    "@codemirror/lang-markdown": "^6.5.2",
+    "codemirror": "^6.0.2"
+  }
+}

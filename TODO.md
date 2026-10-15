@@ -31,9 +31,10 @@ Analyzing the whole ASAR times out on the bundled `lib/pdfjs`. Pass `source_path
 
 ## Phase 2 — Scaffold (~1 h)
 
-- [ ] Ask Claude: "Scaffold an Electron + TypeScript + Vite app here, using the same
-      editor library Obsidian uses (from `analysis/overview.md`). Window opens, nothing else."
-- [ ] `npm run dev` opens an empty window
+- [x] Scaffold Electron 44 + electron-vite + TypeScript, with a bare CodeMirror 6 editor
+- [ ] `npm install && npm run dev` opens a window with a Markdown editor
+
+If the window never opens, run `unset ELECTRON_RUN_AS_NODE` first (VS Code sets it).
 
 ## Phase 3 — Features, one at a time (~1–3 h each)
 

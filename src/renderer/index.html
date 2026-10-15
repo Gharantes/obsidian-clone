@@ -5,15 +5,41 @@
     <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'" />
     <title>Obsidian Clone</title>
     <style>
-      html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; }
-      #app, .cm-editor { height: 100%; }
+      html, body { margin: 0; height: 100%; font-family: system-ui, sans-serif; font-size: 14px; }
+      #app { height: 100%; }
+      button { font: inherit; cursor: pointer; }
+
       .picker { max-width: 480px; margin: 0 auto; padding: 48px 16px; box-sizing: border-box; }
-      .picker button { font: inherit; padding: 8px 14px; cursor: pointer; }
+      .picker button { padding: 8px 14px; }
       .picker .error { color: #c62828; min-height: 1.2em; }
       .picker ul { list-style: none; padding: 0; }
       .picker li { padding: 8px; border-radius: 6px; cursor: pointer; }
       .picker li:hover { background: #0001; }
       .picker small { display: block; color: #666; }
+
+      .vault { display: grid; grid-template-columns: 240px 1fr; }
+      .vault nav { border-right: 1px solid #ddd; overflow: auto; background: #f6f6f6; }
+      .vault .actions { display: flex; gap: 4px; padding: 8px; }
+      .vault main { overflow: hidden; }
+      .vault main.empty .cm-editor, .vault main:not(.empty) .placeholder { display: none; }
+      .vault .placeholder { color: #888; text-align: center; margin-top: 30vh; }
+      .cm-editor { height: 100%; }
+
+      .tree, .tree ul { list-style: none; margin: 0; padding: 0; }
+      .tree ul { padding-left: 14px; }
+      .row { padding: 3px 8px 3px 20px; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .row:hover { background: #0000000d; }
+      .row.active { background: #0000001a; }
+      .row.other { color: #999; cursor: default; }
+      .row.folder { padding-left: 8px; }
+      .row.folder::before { content: '▸ '; }
+      .row.folder.open::before { content: '▾ '; }
+      .row input { font: inherit; width: 100%; box-sizing: border-box; }
+
+      .menu { position: fixed; display: flex; flex-direction: column; background: #fff; border: 1px solid #ccc; border-radius: 6px; padding: 4px; box-shadow: 0 4px 12px #0002; }
+      .menu[hidden] { display: none; }
+      .menu button { border: 0; background: none; text-align: left; padding: 4px 12px; border-radius: 4px; }
+      .menu button:hover { background: #0000000d; }
     </style>
   </head>
   <body>

@@ -1,6 +1,8 @@
-import { app, BrowserWindow, dialog, ipcMain } from 'electron'
+import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
+import { mkdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { addVault, loadRegistry, saveRegistry, type Registry } from './vaults.ts'
+import { availablePath, inVault, listTree, renameEntry } from './files.ts'
 
 const registryFile = () => join(app.getPath('userData'), 'vaults.json')
 let vaults: Registry = {}
@@ -36,7 +38,16 @@ function openVaultWindow(id: string): void {
   vaultWindows.set(id, win)
   vaults[id].open = true
   save()
+
+  // Tell the renderer when anything in the vault changes on disk (debounced).
+  let timer: NodeJS.Timeout | undefined
+  const watcher = watch(vaults[id].path, { recursive: true }, () => {
+    clearTimeout(timer)
+    timer = setTimeout(() => win.isDestroyed() || win.webContents.send('fs:changed'), 100)
+  }).on('error', () => {})
+
   win.on('closed', () => {
+    watcher.close()
     vaultWindows.delete(id)
     // Keep the flag on quit or when the last window closes, so the next launch reopens it.
     if (!quitting && vaultWindows.size > 0) {
@@ -71,6 +82,27 @@ ipcMain.handle('vault:pick', async (e) => {
   const win = BrowserWindow.fromWebContents(e.sender)!
   const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] })
   return r.canceled ? null : openVault(r.filePaths[0])
+})
+
+// Folder of the vault that owns the calling window.
+function vaultOf(e: IpcMainInvokeEvent): string {
+  for (const [id, win] of vaultWindows) if (win.webContents === e.sender) return vaults[id].path
+  throw new Error('Window has no vault')
+}
+
+ipcMain.handle('fs:list', (e) => listTree(vaultOf(e)))
+ipcMain.handle('fs:read', (e, rel: string) => readFileSync(inVault(vaultOf(e), rel), 'utf8'))
+ipcMain.handle('fs:write', (e, rel: string, text: string) => writeFileSync(inVault(vaultOf(e), rel), text))
+ipcMain.handle('fs:rename', (e, rel: string, name: string) => renameEntry(vaultOf(e), rel, name))
+// Moves to the OS trash; false when the filesystem has none (e.g. tmpfs).
+ipcMain.handle('fs:trash', (e, rel: string) => shell.trashItem(inVault(vaultOf(e), rel)).then(() => true, () => false))
+ipcMain.handle('fs:remove', (e, rel: string) => rmSync(inVault(vaultOf(e), rel), { recursive: true }))
+ipcMain.handle('fs:create', (e, folder: boolean) => {
+  const root = vaultOf(e)
+  const path = availablePath(root, 'Untitled', folder ? '' : 'md')
+  if (folder) mkdirSync(inVault(root, path))
+  else writeFileSync(inVault(root, path), '')
+  return path
 })
 
 app.whenReady().then(() => {

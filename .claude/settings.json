@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cd \"$CLAUDE_PROJECT_DIR\" && [ \"$(jq -r .stop_hook_active)\" != true ] && [ -n \"$(git status --porcelain)\" ] && echo '{\"decision\":\"block\",\"reason\":\"Uncommitted changes in this repo. Commit them now with a message explaining what changed and why (subject line + short body).\"}'; exit 0",
+            "statusMessage": "Checking for uncommitted changes"
+          }
+        ]
+      }
+    ]
+  }
+}

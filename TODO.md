@@ -10,28 +10,24 @@ Never paste Obsidian's code into this repo. Raw analysis output goes in `analysi
 
 ## Phase 0 — Fix setup (blocker, ~5 min)
 
-`rea doctor` says REA is **not registered with Claude Code** and the skill is missing.
-
-- [ ] Run `npx rea-agents@latest setup`, select **Claude Code**, approve
-- [ ] Restart VS Code (or the `claude` CLI)
-- [ ] Verify: `claude mcp list | grep -i rea` shows the server
-- [ ] Verify in Claude: "Call REA's `binary_session` tool" returns a version
+- [x] Run `npx rea-agents@latest setup --client claude_code --yes`
+- [x] Verify: `claude mcp list | grep -i rea` shows `rea: ... ✔ Connected`
+- [x] Restart VS Code (or the `claude` CLI)
+- [x] Verify in Claude: "Call REA's `binary_session` tool" returns a version
 
 No Hopper/Ghidra/IDA needed: Obsidian is Electron, static JS analysis covers it.
 
 ## Phase 1 — Map the app (~20 min)
 
-- [ ] Ask Claude:
+- [x] Ask Claude:
   > Using REA, analyze the Electron app at `~/.config/obsidian/obsidian-1.14.4.asar`.
   > Save the raw result to `analysis/overview.json` and write `analysis/overview.md`:
   > main vs renderer modules, IPC channels, bundled libraries (with versions), and
   > where the vault/file I/O happens.
-- [ ] Read `analysis/overview.md`. Confirm the editor library (expected: CodeMirror 6)
+- [ ] Read `analysis/overview.md`. Editor confirmed: CodeMirror 6
 
-CLI alternative, same result:
-```bash
-npx -y rea-agents@latest analyze-javascript-application ~/.config/obsidian/obsidian-1.14.4.asar --json > analysis/overview.json
-```
+Analyzing the whole ASAR times out on the bundled `lib/pdfjs`. Pass `source_paths`
+`["package.json","main.js","index.html","starter.html","starter.js","enhance.js","worker.js","app.js"]`.
 
 ## Phase 2 — Scaffold (~1 h)
 

@@ -29,3 +29,6 @@ target/
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# REA analysis output (contains Obsidian code)
+analysis/

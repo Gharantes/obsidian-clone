@@ -49,7 +49,7 @@ Tick each one only after you tried it in the running app.
 **MVP**
 - [x] Open a folder as a vault
 - [x] File explorer sidebar (create / rename / delete notes)
-- [ ] Markdown editor with live preview
+- [x] Markdown editor with live preview
 - [ ] `[[wikilinks]]` + click to open
 - [ ] Backlinks panel
 

@@ -1,6 +1,6 @@
 import { HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/language'
 import type { EditorState } from '@codemirror/state'
-import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate } from '@codemirror/view'
+import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view'
 import { tags as t } from '@lezer/highlight'
 
 // Syntax marks to hide, keyed by node name, with the parent elements they are hidden in.
@@ -12,7 +12,11 @@ const HIDE: Record<string, (parent: string) => boolean> = {
   QuoteMark: () => true
 }
 
-export type Span = { from: number; to: number; kind: 'hide' | 'quote' }
+// Obsidian image embeds: ![[name.png]] or ![[name.png|alt]].
+const EMBED = /!\[\[([^\]|#]+\.(?:png|jpe?g|gif|webp))(?:\|[^\]]*)?\]\]/gi
+
+// `name` is set on image spans: the embed is shown as that image.
+export type Span = { from: number; to: number; kind: 'hide' | 'quote' | 'image'; name?: string }
 
 // Ranges to hide (and quote lines to style) between from and to, given the current selection.
 export function previewSpans(state: EditorState, from = 0, to = state.doc.length): Span[] {
@@ -45,34 +49,57 @@ export function previewSpans(state: EditorState, from = 0, to = state.doc.length
       spans.push({ from: node.from, to: node.to + (spaced ? 1 : 0), kind: 'hide' })
     }
   })
+  for (let pos = from; pos <= to; ) {
+    const line = state.doc.lineAt(pos)
+    for (const m of line.text.matchAll(EMBED)) {
+      const [a, b] = [line.from + m.index, line.from + m.index + m[0].length]
+      if (!touched(a, b)) spans.push({ from: a, to: b, kind: 'image', name: m[1] })
+    }
+    pos = line.to + 1
+  }
   return spans
+}
+
+class ImageWidget extends WidgetType {
+  src: string
+  constructor(src: string) {
+    super()
+    this.src = src
+  }
+  eq(other: ImageWidget) {
+    return other.src === this.src
+  }
+  toDOM() {
+    return Object.assign(document.createElement('img'), { src: this.src, className: 'cm-embed' })
+  }
 }
 
 const hidden = Decoration.replace({})
 const quoteLine = Decoration.line({ class: 'cm-lp-quote' })
 
-function decorations(view: EditorView): DecorationSet {
+function decorations(view: EditorView, imageUrl: (name: string) => string): DecorationSet {
   const { from } = view.visibleRanges[0] ?? { from: 0 }
   const { to } = view.visibleRanges.at(-1) ?? { to: 0 }
   const decos = previewSpans(view.state, from, to).map((s) =>
-    (s.kind === 'hide' ? hidden : quoteLine).range(s.from, s.to)
+    (s.kind === 'image' ? Decoration.replace({ widget: new ImageWidget(imageUrl(s.name!)) }) : s.kind === 'hide' ? hidden : quoteLine).range(s.from, s.to)
   )
   return Decoration.set(decos, true)
 }
 
-const plugin = ViewPlugin.fromClass(
-  class {
-    decorations: DecorationSet
-    constructor(view: EditorView) {
-      this.decorations = decorations(view)
-    }
-    update(u: ViewUpdate) {
-      if (u.docChanged || u.viewportChanged || u.selectionSet || syntaxTree(u.startState) !== syntaxTree(u.state))
-        this.decorations = decorations(u.view)
-    }
-  },
-  { decorations: (v) => v.decorations }
-)
+const plugin = (imageUrl: (name: string) => string) =>
+  ViewPlugin.fromClass(
+    class {
+      decorations: DecorationSet
+      constructor(view: EditorView) {
+        this.decorations = decorations(view, imageUrl)
+      }
+      update(u: ViewUpdate) {
+        if (u.docChanged || u.viewportChanged || u.selectionSet || syntaxTree(u.startState) !== syntaxTree(u.state))
+          this.decorations = decorations(u.view, imageUrl)
+      }
+    },
+    { decorations: (v) => v.decorations }
+  )
 
 const style = HighlightStyle.define([
   { tag: t.heading1, fontSize: '1.8em', fontWeight: '700' },
@@ -90,8 +117,10 @@ const style = HighlightStyle.define([
 
 const theme = EditorView.theme({
   '.cm-content': { padding: '24px 32px', maxWidth: '760px', margin: '0 auto' },
-  '.cm-lp-quote': { borderLeft: '3px solid #7c4dff', paddingLeft: '12px' }
+  '.cm-lp-quote': { borderLeft: '3px solid #7c4dff', paddingLeft: '12px' },
+  '.cm-embed': { display: 'block', maxWidth: '100%', maxHeight: '480px', borderRadius: '6px', margin: '6px 0' }
 })
 
 // Obsidian-style Live Preview: Markdown renders inline, syntax shows only where the cursor is.
-export const livePreview = () => [plugin, syntaxHighlighting(style), theme]
+// `imageUrl` maps an embedded image name to its URL.
+export const livePreview = (imageUrl: (name: string) => string) => [plugin(imageUrl), syntaxHighlighting(style), theme]

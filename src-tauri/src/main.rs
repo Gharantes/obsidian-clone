@@ -4,11 +4,13 @@
 mod ai;
 mod books;
 mod files;
+mod images;
 mod settings;
 
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use settings::Settings;
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -183,6 +185,11 @@ fn book_color(state: AppState, id: String, color: String) -> Result<(), String> 
 }
 
 #[tauri::command]
+fn book_cover(state: AppState, id: String, name: Option<String>) -> Result<(), String> {
+    books::set_cover(&state.lock().unwrap().db, &id, name.as_deref())
+}
+
+#[tauri::command]
 fn book_remove(state: AppState, id: String) -> Option<String> {
     let st = state.lock().unwrap();
     if st.window_with(&id).is_some() {
@@ -250,11 +257,13 @@ fn fs_create(state: AppState, window: WebviewWindow, folder: bool, parent: Optio
 
 const MASK: &str = "••••••••";
 
-// The renderer never sees the stored API key, only whether there is one.
+// The renderer never sees the stored API keys, only whether there are any.
 fn public_settings(st: &App) -> Settings {
     let mut s = st.settings.clone();
-    if !s.ai.openai.api_key.is_empty() {
-        s.ai.openai.api_key = MASK.into();
+    for key in [&mut s.ai.openai.api_key, &mut s.image.openai.api_key] {
+        if !key.is_empty() {
+            *key = MASK.into();
+        }
     }
     s
 }
@@ -270,6 +279,9 @@ fn settings_set(state: AppState, s: Settings) -> Settings {
     let mut s = s;
     if s.ai.openai.api_key == MASK {
         s.ai.openai.api_key = st.settings.ai.openai.api_key.clone();
+    }
+    if s.image.openai.api_key == MASK {
+        s.image.openai.api_key = st.settings.image.openai.api_key.clone();
     }
     st.settings = s;
     let _ = settings::save_settings(&st.dir.join("settings.json"), &st.settings);
@@ -295,6 +307,31 @@ async fn ai_generate(app: AppHandle, window: WebviewWindow, id: String, prompt: 
     let r = ai::generate(&ai, &home, &workdir, &prompt, &system, &mut on_text, &cancel).await;
     app.state::<Mutex<App>>().lock().unwrap().jobs.remove(&id);
     r.err()
+}
+
+// Generates an image into a book (the window's book when `book` is None); resolves to { name } or { error }.
+// Cancelled with ai_cancel, like text.
+#[tauri::command]
+async fn image_generate(app: AppHandle, window: WebviewWindow, id: String, prompt: String, width: u32, height: u32, book: Option<String>) -> Value {
+    let cancel = CancellationToken::new();
+    let found = {
+        let state = app.state::<Mutex<App>>();
+        let mut st = state.lock().unwrap();
+        st.jobs.insert(id.clone(), cancel.clone());
+        book.map_or_else(|| st.book_of(window.label()), Ok).map(|b| (b, st.settings.image.clone()))
+    };
+    let r = match found {
+        Ok((book, cfg)) => images::generate(&cfg, &prompt, width, height, &cancel).await.and_then(|data| {
+            let name = format!("AI image {}.{}", books::now_ms(), images::kind(&data).unwrap().0);
+            images::add(&app.state::<Mutex<App>>().lock().unwrap().db, &book, &name, &data).map(|_| name)
+        }),
+        Err(e) => Err(e),
+    };
+    app.state::<Mutex<App>>().lock().unwrap().jobs.remove(&id);
+    match r {
+        Ok(name) => json!({ "name": name }),
+        Err(error) => json!({ "error": error }),
+    }
 }
 
 #[tauri::command]
@@ -331,11 +368,26 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_remove,
+            book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_cover, book_remove,
             fs_list, fs_read, fs_write, fs_rename, fs_nest, fs_move, fs_remove, fs_create,
             settings_get, settings_set,
-            ai_generate, ai_cancel, ai_detect_claude, ai_test
+            ai_generate, ai_cancel, ai_detect_claude, ai_test, image_generate
         ])
+        // Serves book images at img://localhost/<book id>%2F<name> (see convertFileSrc in the renderer).
+        .register_uri_scheme_protocol("img", |ctx, req| {
+            let path = percent_encoding::percent_decode_str(req.uri().path().trim_start_matches('/')).decode_utf8_lossy().into_owned();
+            let data = path.split_once('/').and_then(|(book, name)| {
+                let state = ctx.app_handle().state::<Mutex<App>>();
+                let st = state.lock().unwrap();
+                images::get(&st.db, book, name).ok().flatten()
+            });
+            let res = tauri::http::Response::builder();
+            match data {
+                Some(data) => res.header("content-type", images::kind(&data).map_or("application/octet-stream", |k| k.1)).body(Cow::Owned(data)),
+                None => res.status(404).body(Cow::Owned(Vec::new())),
+            }
+            .unwrap()
+        })
         .setup(|app| {
             let paths = app.path();
             let home = paths.home_dir()?;

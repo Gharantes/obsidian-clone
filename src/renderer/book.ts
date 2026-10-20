@@ -10,7 +10,7 @@ import { h } from './ui.ts'
 const { api } = window
 
 // One editor for the open note; edits autosave 500 ms after the last change.
-function createEditor(pane: HTMLElement, crumbs: HTMLElement) {
+function createEditor(pane: HTMLElement, crumbs: HTMLElement, book: string) {
   let current: string | null = null
   let timer: ReturnType<typeof setTimeout> | undefined
   const save = () => {
@@ -24,7 +24,7 @@ function createEditor(pane: HTMLElement, crumbs: HTMLElement) {
   const extensions = [
     basicSetup,
     markdown({ base: markdownLanguage }),
-    livePreview(),
+    livePreview((name) => api.images.url(book, name)),
     ai.extension,
     EditorView.lineWrapping,
     EditorView.updateListener.of((u) => {
@@ -70,7 +70,7 @@ function createEditor(pane: HTMLElement, crumbs: HTMLElement) {
 }
 
 // A book: file tree on the left, the open note on the right.
-export function showBook(root: HTMLElement, book: { title: string }): void {
+export function showBook(root: HTMLElement, book: { id: string; title: string }): void {
   document.title = book.title
   root.className = 'book-view'
   const tree = h('ul', { class: 'tree' })
@@ -99,7 +99,7 @@ export function showBook(root: HTMLElement, book: { title: string }): void {
       )
     )
   )
-  const editor = createEditor(pane, crumbs)
+  const editor = createEditor(pane, crumbs, book.id)
   const explorer = createExplorer(tree, editor)
   aiButton.onclick = () => editor.ai.toggle()
   newNote.onclick = () => explorer.create(false)

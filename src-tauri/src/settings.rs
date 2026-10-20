@@ -7,6 +7,7 @@ use std::path::Path;
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
     pub ai: Ai,
+    pub image: Image,
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -28,6 +29,21 @@ pub struct OpenAi {
     pub base_url: String,
     pub model: String,
     pub api_key: String,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Image {
+    // "pollinations" (free, no key) or "openai".
+    pub provider: String,
+    // Any OpenAI-compatible /images/generations endpoint (stable-diffusion.cpp, LocalAI, ...).
+    pub openai: OpenAi,
+}
+
+impl Default for Image {
+    fn default() -> Self {
+        Image { provider: "pollinations".into(), openai: OpenAi { base_url: "http://127.0.0.1:8080/v1".into(), model: String::new(), api_key: String::new() } }
+    }
 }
 
 impl Default for Ai {

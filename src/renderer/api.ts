@@ -1,11 +1,12 @@
-import { invoke } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { buildPrompt, outline, parentNotes, SYSTEM, type AiRequest } from './prompt.ts'
 
 // Folders carry `note` when they have a folder note ("X/X.md"); that note is left out of `children`.
 export type Entry = { path: string; name: string; folder: boolean; note?: string; children?: Entry[] }
 
-export type Book = { id: string; ts: number; title: string; notes: number; color: string }
+// `cover` is the name of the book's cover image, if it has one.
+export type Book = { id: string; ts: number; title: string; notes: number; color: string; cover: string | null }
 
 export type Provider = 'claude-code' | 'openai'
 
@@ -17,6 +18,11 @@ export type Settings = {
     // Model alias or full id passed to `claude --model`; empty uses Claude Code's default.
     claudeModel: string
     // Any OpenAI-compatible /chat/completions endpoint (Ollama, Groq, OpenRouter, Gemini, ...).
+    openai: { baseUrl: string; model: string; apiKey: string }
+  }
+  image: {
+    // Pollinations is free with no key; "openai" is any /images/generations server (stable-diffusion.cpp, LocalAI, ...).
+    provider: 'pollinations' | 'openai'
     openai: { baseUrl: string; model: string; apiKey: string }
   }
 }
@@ -39,6 +45,7 @@ const books = {
   current: (): Promise<{ id: string; title: string } | null> => invoke('book_current'),
   rename: (id: string, title: string): Promise<string | null> => invoke('book_rename', { id, title }),
   setColor: (id: string, color: string): Promise<void> => invoke('book_color', { id, color }),
+  setCover: (id: string, name: string | null): Promise<void> => invoke('book_cover', { id, name }),
   remove: (id: string): Promise<string | null> => invoke('book_remove', { id })
 }
 
@@ -70,9 +77,17 @@ async function generate(id: string, req: AiRequest): Promise<string | null> {
   }
 }
 
+// Book images, embedded in notes as ![[name]]. Generating is cancelled with ai.cancel(id).
+const images = {
+  generate: (id: string, prompt: string, width: number, height: number, book?: string): Promise<{ name: string } | { error: string }> =>
+    invoke('image_generate', { id, prompt, width, height, book }),
+  url: (book: string, name: string) => convertFileSrc(`${book}/${name}`, 'img')
+}
+
 export const api = {
   books,
   files,
+  images,
   settings: {
     get: (): Promise<Settings> => invoke('settings_get'),
     set: (s: Settings): Promise<Settings> => invoke('settings_set', { s })

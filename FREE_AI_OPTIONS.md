@@ -63,6 +63,20 @@ Baseten ($30). These are fine for trying a model, not for ongoing free use.
 - **ChatGPT / Claude.ai / Gemini web apps**: free in the browser, but have no API to call from
   an app.
 
+## Images (covers and pictures in notes)
+
+Settings → Images. Checked **2026-10-20**.
+
+| Option | Cost | Notes |
+|---|---|---|
+| **Pollinations** (default) | Free, no key, no account | `image.pollinations.ai/prompt/…`. 1 image every 45 s per IP, small "pollinations.ai" watermark. Pollinations calls this endpoint "legacy", so it may go away. Keyed use (`gen.pollinations.ai`) spends "pollen" credits, so it's not in the app. |
+| **stable-diffusion.cpp** `sd-server` (local) | Free, unlimited, offline | Pick *OpenAI-compatible server*, base URL `http://127.0.0.1:8080/v1`. Needs a model file (e.g. SD 1.5/SDXL/FLUX schnell GGUF) and a decent GPU or patience. |
+| **LocalAI** (local) | Free | Same OpenAI `/v1/images/generations` API. |
+
+Not usable for free: Ollama's image generation is macOS-only (and experimental). Gemini/Imagen image
+models have no reliable free API tier. Cloudflare Workers AI has free FLUX (10K neurons/day), but
+it isn't OpenAI-compatible for images, so it would need its own provider.
+
 ## Ideas for later
 
 - Add a model dropdown filled from `GET {baseUrl}/models` (works on Ollama, OpenRouter, Groq…).
@@ -70,6 +84,8 @@ Baseten ($30). These are fine for trying a model, not for ongoing free use.
 - Show a "free requests left today" hint for providers that return rate-limit headers.
 
 ## Sources
+
+- [Pollinations API docs](https://github.com/pollinations/pollinations/blob/main/APIDOCS.md), [stable-diffusion.cpp server](https://github.com/leejet/stable-diffusion.cpp/tree/master/examples/server), [Ollama image generation](https://github.com/ollama/ollama/blob/main/x/imagegen/README.md)
 
 - [OpenRouter: Free LLM APIs in 2026, 13 options compared](https://openrouter.ai/blog/tutorials/free-llm-apis-compared/) (updated 2026-09-24)
 - [Gemini API OpenAI compatibility docs](https://ai.google.dev/gemini-api/docs/openai)

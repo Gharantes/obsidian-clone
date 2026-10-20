@@ -27,3 +27,10 @@ test('live preview hides syntax away from the cursor', () => {
   assert.ok(visible(doc, doc.indexOf('bold') + 1).includes('**bold**'), 'cursor in bold shows **')
   assert.ok(visible(doc, doc.indexOf('bold') + 1).includes(' it,'), 'other elements stay hidden')
 })
+
+test('image embeds show as images away from the cursor', () => {
+  const doc = 'See ![[AI image 1.jpg|cover]] and ![[notes.md]]'
+  const spans = (cursor: number) => previewSpans(EditorState.create({ doc, selection: { anchor: cursor } })).filter((s) => s.kind === 'image')
+  assert.deepEqual(spans(doc.length), [{ from: 4, to: 29, kind: 'image', name: 'AI image 1.jpg' }], 'only image files embed')
+  assert.deepEqual(spans(10), [], 'cursor on the embed shows its text')
+})

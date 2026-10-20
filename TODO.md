@@ -65,6 +65,7 @@ Tick each one only after you tried it in the running app.
 - [x] Folder notes (folder `X` + note `X/X.md` act as one item; nest notes; drag to move)
 - [x] AI writing with Claude Code (Ctrl+J: write, continue, rewrite selection)
 - [x] OpenAI-compatible provider for free options (see `FREE_AI_OPTIONS.md`)
+- [ ] AI images: covers and `![[image]]` embeds in notes (free via Pollinations)
 
 **Later**: settings screen, themes, plugin API, tabs/splits.
 

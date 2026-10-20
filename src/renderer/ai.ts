@@ -39,6 +39,7 @@ type State = 'idle' | 'running' | 'review'
 
 // AI writing bar for the editor (Ctrl/Cmd+J): write at the cursor, continue the note, or rewrite
 // the selection. Text streams into the note, then Keep (one undo step) or Discard.
+// Image draws the typed description and embeds it at the cursor as ![[name]].
 export function createAi(view: EditorView, getPath: () => string | null) {
   let state: State = 'idle'
   let job: string | null = null
@@ -49,6 +50,7 @@ export function createAi(view: EditorView, getPath: () => string | null) {
   const btn = (text: string, run: () => void, cls = '') => h('button', { textContent: text, className: cls, onclick: run })
   const b = {
     continue: btn('Continue writing', () => start('continue')),
+    image: btn('🖼 Image', () => image()),
     generate: btn('Generate', () => start('write'), 'primary'),
     stop: btn('Stop', () => job && window.api.ai.cancel(job)),
     keep: btn('Keep', () => keep(), 'primary'),
@@ -58,10 +60,11 @@ export function createAi(view: EditorView, getPath: () => string | null) {
   }
   const bar = h('div', { class: 'ai-bar', hidden: true }, h('span', { class: 'spark', textContent: '✨' }), input, status, ...Object.values(b))
   b.close.title = 'Close (Esc)'
+  b.image.title = 'Generate an image of what you typed and insert it at the cursor'
 
   const hasSelection = () => !view.state.selection.main.empty
   const shown: Record<State, (keyof typeof b)[]> = {
-    idle: ['continue', 'generate', 'close'],
+    idle: ['continue', 'image', 'generate', 'close'],
     running: ['stop'],
     review: ['keep', 'discard', 'retry']
   }
@@ -125,6 +128,25 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     }
     setState('review', error ?? '', !!error)
     b.keep.focus()
+  }
+
+  async function image() {
+    const prompt = input.value.trim()
+    if (!getPath() || state !== 'idle') return
+    if (!prompt) return input.focus()
+    const id = (job = crypto.randomUUID())
+    setState('running', 'Drawing…')
+    const r = await window.api.images.generate(id, prompt, 1024, 768)
+    if (job !== id) return // settled by switching notes
+    job = null
+    if ('error' in r) return setState('idle', r.error, true)
+    const at = view.state.selection.main.to
+    // The cursor goes to the next line so the embed shows as the image.
+    const text = `![[${r.name}]]\n`
+    view.dispatch({ changes: { from: at, insert: text }, selection: { anchor: at + text.length } })
+    input.value = ''
+    setState('idle')
+    view.focus()
   }
 
   // Re-applies the generated text as a single undoable change replacing the original.

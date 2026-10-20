@@ -17,7 +17,7 @@ export const PRESETS: { name: string; baseUrl: string; model: string; key: strin
 
 const field = (label: string, ...control: (Node | string)[]) => h('label', { class: 'field' }, h('span', { textContent: label }), ...control)
 
-// Settings dialog: the AI provider.
+// Settings dialog: the AI writing and image providers.
 export async function openSettings(): Promise<void> {
   let s: Settings = await api.settings.get()
 
@@ -49,11 +49,28 @@ export async function openSettings(): Promise<void> {
   }
   const openai = h('fieldset', {}, field('Preset', preset), field('Base URL', baseUrl), field('Model', model), field('API key', apiKey), keyHint)
 
+  const imageProvider = h('select', {},
+    h('option', { value: 'pollinations', textContent: 'Pollinations (free, no key, small watermark)' }),
+    h('option', { value: 'openai', textContent: 'OpenAI-compatible server (stable-diffusion.cpp, LocalAI, …)' })
+  )
+  imageProvider.value = s.image.provider
+  const imageUrl = h('input', { value: s.image.openai.baseUrl })
+  const imageModel = h('input', { value: s.image.openai.model, placeholder: "Server's default" })
+  const imageKey = h('input', { type: 'password', value: s.image.openai.apiKey, placeholder: 'Leave empty for local servers' })
+  const imageOpenai = h('fieldset', {},
+    field('Base URL', imageUrl),
+    field('Model', imageModel),
+    field('API key', imageKey),
+    h('p', { class: 'hint', textContent: 'Calls POST <base URL>/images/generations, e.g. `sd-server --listen-port 8080` from stable-diffusion.cpp.' })
+  )
+
   const sync = () => {
     claude.hidden = provider.value !== 'claude-code'
     openai.hidden = provider.value !== 'openai'
+    imageOpenai.hidden = imageProvider.value !== 'openai'
   }
   provider.onchange = sync
+  imageProvider.onchange = sync
   sync()
 
   const collect = (): Settings => ({
@@ -63,6 +80,10 @@ export async function openSettings(): Promise<void> {
       claudePath: claudePath.value.trim(),
       claudeModel: claudeModel.value.trim(),
       openai: { baseUrl: baseUrl.value.trim(), model: model.value.trim(), apiKey: apiKey.value.trim() }
+    },
+    image: {
+      provider: imageProvider.value as Settings['image']['provider'],
+      openai: { baseUrl: imageUrl.value.trim(), model: imageModel.value.trim(), apiKey: imageKey.value.trim() }
     }
   })
 
@@ -88,7 +109,10 @@ export async function openSettings(): Promise<void> {
       field('Provider', provider),
       claude,
       openai,
-      h('div', { class: 'row-input' }, test, result)
+      h('div', { class: 'row-input' }, test, result),
+      h('h3', { textContent: 'Images' }),
+      field('Provider', imageProvider),
+      imageOpenai
     ],
     [
       h('button', { textContent: 'Cancel', onclick: () => dlg.close() }),

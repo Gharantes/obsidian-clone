@@ -52,9 +52,43 @@ async function newBook(covers: string[]): Promise<void> {
   input.focus()
 }
 
+// Asks for a description and draws a cover image for the book; resolves when done or cancelled.
+function generateCover(b: Book): Promise<void> {
+  return new Promise((resolve) => {
+    const job = crypto.randomUUID()
+    const input = h('input', { value: `Book cover illustration for "${b.title}", no text` })
+    const status = h('p', { class: 'hint', textContent: 'Free via your image provider (Settings). Takes about 10 seconds.' })
+    const draw = async () => {
+      if (!input.value.trim()) return input.focus()
+      go.disabled = input.disabled = true
+      status.className = 'hint'
+      status.textContent = 'Drawing…'
+      const r = await api.images.generate(job, input.value.trim(), 768, 1024, b.id)
+      go.disabled = input.disabled = false
+      if ('error' in r) {
+        status.className = 'error'
+        status.textContent = r.error
+        return
+      }
+      await api.books.setCover(b.id, r.name)
+      dlg.close()
+    }
+    const go = h('button', { class: 'primary', textContent: 'Generate', onclick: draw })
+    input.onkeydown = (k) => k.key === 'Enter' && draw()
+    const cancel = h('button', { textContent: 'Cancel', onclick: () => dlg.close() })
+    const dlg = modal('Generate cover image', [input, status], [cancel, go], () => (api.ai.cancel(job), resolve()))
+    input.focus()
+    input.select()
+  })
+}
+
 function card(b: Book, covers: string[], reload: () => void, report: (e: string | null) => void): HTMLElement {
   const cover = h('div', { class: 'cover' }, h('span', { textContent: b.title }))
   cover.style.setProperty('--cover', b.color)
+  if (b.cover) {
+    cover.classList.add('image')
+    cover.style.setProperty('--image', `url("${api.images.url(b.id, b.cover)}")`)
+  }
   const meta = `${b.notes} note${b.notes === 1 ? '' : 's'} · ${ago(b.ts)}`
   const el = h('div', { class: 'book', tabIndex: 0 }, cover, h('b', { textContent: b.title }), h('small', { textContent: meta }))
   const open = async () => report(await api.books.open(b.id))
@@ -82,6 +116,8 @@ function card(b: Book, covers: string[], reload: () => void, report: (e: string 
           if (c) await api.books.setColor(b.id, c)
         })
       },
+      { label: 'Generate cover image…', run: () => generateCover(b).then(reload) },
+      ...(b.cover ? [{ label: 'Remove cover image', run: run(() => api.books.setCover(b.id, null)) }] : []),
       { label: 'Export as .zip…', run: run(() => api.books.export(b.id)) },
       '-',
       {

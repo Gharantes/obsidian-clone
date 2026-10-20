@@ -49,7 +49,7 @@ pub fn natural_cmp(a: &str, b: &str) -> Ordering {
     }
 }
 
-fn base_name(rel: &str) -> &str {
+pub fn base_name(rel: &str) -> &str {
     &rel[rel.rfind('/').map_or(0, |i| i + 1)..]
 }
 

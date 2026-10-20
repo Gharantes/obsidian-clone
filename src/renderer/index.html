@@ -50,6 +50,8 @@
       }
       .cover::before { content: ''; position: absolute; inset: 0 auto 0 0; width: 9px; background: linear-gradient(90deg, #0004, #0000); border-right: 1px solid #fff3; }
       .cover span { font-family: Georgia, 'Times New Roman', serif; font-size: 19px; font-weight: 700; text-align: center; line-height: 1.25; text-shadow: 0 1px 2px #0005; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 5; -webkit-box-orient: vertical; overflow: hidden; }
+      .cover.image { background: var(--image) center / cover, var(--cover); }
+      .cover.image span { display: none; }
       .book:hover .cover, .book:focus-visible .cover { transform: translateY(-4px); box-shadow: 0 4px 8px #0002, 0 16px 30px #0003; }
       .book:focus-visible .cover { outline: 2px solid var(--accent); outline-offset: 3px; }
       .book.add .cover { background: none; border: 2px dashed var(--line); box-shadow: none; color: var(--muted); }

@@ -10,6 +10,9 @@ A clone of [Obsidian](https://obsidian.md), the Markdown knowledge base app, sha
 - **AI writing**: in a note press **Ctrl+J** (or the ✨ AI button). Type an instruction to write at the cursor, use
   *Continue writing*, or select text to *Rewrite* it. Text streams in highlighted; **Keep** or **Discard**.
   The AI sees the book outline, parent folder notes and the current note.
+- **AI images**: in the AI bar type a description and press **🖼 Image** to insert it into the note as `![[name.jpg]]`.
+  Right-click a book → *Generate cover image…* for an AI cover. Free by default (Pollinations, no key); see
+  [FREE_AI_OPTIONS.md](FREE_AI_OPTIONS.md#images-covers-and-pictures-in-notes). Exported zips keep images in `attachments/`.
 
 ## AI providers
 

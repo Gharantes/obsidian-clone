@@ -2268,7 +2268,9 @@ dependencies = [
 name = "obsidian-clone"
 version = "0.0.1"
 dependencies = [
+ "base64 0.22.1",
  "futures-util",
+ "percent-encoding",
  "reqwest",
  "rusqlite",
  "serde",

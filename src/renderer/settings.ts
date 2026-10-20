@@ -17,18 +17,9 @@ export const PRESETS: { name: string; baseUrl: string; model: string; key: strin
 
 const field = (label: string, ...control: (Node | string)[]) => h('label', { class: 'field' }, h('span', { textContent: label }), ...control)
 
-// Settings dialog: library folder and the AI provider.
+// Settings dialog: the AI provider.
 export async function openSettings(): Promise<void> {
   let s: Settings = await api.settings.get()
-
-  const library = h('input', { value: s.library ?? '', readOnly: true })
-  const changeLibrary = h('button', {
-    textContent: 'Change…',
-    onclick: async () => {
-      const dir = await api.settings.pickLibrary()
-      if (dir) library.value = dir
-    }
-  })
 
   const provider = h('select', {}, h('option', { value: 'claude-code', textContent: 'Claude Code (uses your Claude subscription)' }), h('option', { value: 'openai', textContent: 'OpenAI-compatible API (Ollama, Gemini, Groq, …)' }))
   provider.value = s.ai.provider
@@ -67,7 +58,6 @@ export async function openSettings(): Promise<void> {
 
   const collect = (): Settings => ({
     ...s,
-    library: library.value,
     ai: {
       provider: provider.value as Settings['ai']['provider'],
       claudePath: claudePath.value.trim(),
@@ -94,8 +84,6 @@ export async function openSettings(): Promise<void> {
   const dlg = modal(
     'Settings',
     [
-      h('h3', { textContent: 'Library' }),
-      field('New books go in', h('div', { class: 'row-input' }, library, changeLibrary)),
       h('h3', { textContent: 'AI writing' }),
       field('Provider', provider),
       claude,

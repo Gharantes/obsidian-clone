@@ -6,9 +6,6 @@ use std::path::Path;
 #[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Settings {
-    // Where new books are created; defaults to Documents/Books.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub library: Option<String>,
     pub ai: Ai,
 }
 

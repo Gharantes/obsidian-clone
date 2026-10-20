@@ -5,13 +5,11 @@ import { buildPrompt, outline, parentNotes, SYSTEM, type AiRequest } from './pro
 // Folders carry `note` when they have a folder note ("X/X.md"); that note is left out of `children`.
 export type Entry = { path: string; name: string; folder: boolean; note?: string; children?: Entry[] }
 
-export type Book = { id: string; path: string; ts: number; title: string; missing: boolean; notes: number; color?: string }
+export type Book = { id: string; ts: number; title: string; notes: number; color: string }
 
 export type Provider = 'claude-code' | 'openai'
 
 export type Settings = {
-  // Where new books are created; defaults to Documents/Books.
-  library?: string
   ai: {
     provider: Provider
     // Claude Code executable; empty means auto-detect.
@@ -34,13 +32,14 @@ const books = {
   covers: (): Promise<string[]> => invoke('book_covers'),
   create: (title: string, color: string): Promise<string | null> => invoke('book_create', { title, color }),
   open: (id: string, newWindow = false): Promise<string | null> => invoke('book_open', { id, newWindow }),
-  pick: (): Promise<string | null> => invoke('book_pick'),
+  // Copies a folder (or a .zip) into a new book and opens it.
+  import: (zip: boolean): Promise<string | null> => invoke('book_import', { zip }),
+  export: (id: string): Promise<string | null> => invoke('book_export', { id }),
   close: (): Promise<void> => invoke('book_close'),
-  current: (): Promise<{ id: string; path: string; title: string } | null> => invoke('book_current'),
+  current: (): Promise<{ id: string; title: string } | null> => invoke('book_current'),
   rename: (id: string, title: string): Promise<string | null> => invoke('book_rename', { id, title }),
   setColor: (id: string, color: string): Promise<void> => invoke('book_color', { id, color }),
-  reveal: (id: string): Promise<void> => invoke('book_reveal', { id }),
-  remove: (id: string, trash: boolean): Promise<string | null> => invoke('book_remove', { id, trash })
+  remove: (id: string): Promise<string | null> => invoke('book_remove', { id })
 }
 
 const files = {
@@ -51,9 +50,7 @@ const files = {
   rename: (path: string, name: string): Moved => invoke('fs_rename', { path, name }),
   nest: (path: string): Moved => invoke('fs_nest', { path }),
   move: (path: string, dest: string): Moved => invoke('fs_move', { path, dest }),
-  trash: (path: string): Promise<boolean> => invoke('fs_trash', { path }),
-  remove: (path: string): Promise<void> => invoke('fs_remove', { path }),
-  onChange: (cb: () => void) => on('fs-changed', () => cb())
+  remove: (path: string): Promise<void> => invoke('fs_remove', { path })
 }
 
 // Builds the prompt from the book (outline, parent folder notes) and streams the reply as chunks.
@@ -78,8 +75,7 @@ export const api = {
   files,
   settings: {
     get: (): Promise<Settings> => invoke('settings_get'),
-    set: (s: Settings): Promise<Settings> => invoke('settings_set', { s }),
-    pickLibrary: (): Promise<string | null> => invoke('settings_pick_library')
+    set: (s: Settings): Promise<Settings> => invoke('settings_set', { s })
   },
   ai: {
     generate,

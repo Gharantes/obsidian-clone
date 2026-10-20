@@ -54,9 +54,9 @@ async function newBook(covers: string[]): Promise<void> {
 
 function card(b: Book, covers: string[], reload: () => void, report: (e: string | null) => void): HTMLElement {
   const cover = h('div', { class: 'cover' }, h('span', { textContent: b.title }))
-  cover.style.setProperty('--cover', b.color ?? covers[0])
-  const meta = b.missing ? 'Folder missing' : `${b.notes} note${b.notes === 1 ? '' : 's'} · ${ago(b.ts)}`
-  const el = h('div', { class: `book${b.missing ? ' missing' : ''}`, title: b.path, tabIndex: 0 }, cover, h('b', { textContent: b.title }), h('small', { textContent: meta }))
+  cover.style.setProperty('--cover', b.color)
+  const meta = `${b.notes} note${b.notes === 1 ? '' : 's'} · ${ago(b.ts)}`
+  const el = h('div', { class: 'book', tabIndex: 0 }, cover, h('b', { textContent: b.title }), h('small', { textContent: meta }))
   const open = async () => report(await api.books.open(b.id))
   el.onclick = open
   el.onkeydown = (k) => k.key === 'Enter' && open()
@@ -82,19 +82,18 @@ function card(b: Book, covers: string[], reload: () => void, report: (e: string 
           if (c) await api.books.setColor(b.id, c)
         })
       },
-      { label: 'Show in file manager', run: () => api.books.reveal(b.id) },
+      { label: 'Export as .zip…', run: run(() => api.books.export(b.id)) },
       '-',
-      { label: 'Remove from library', run: run(async () => (confirm(`Remove "${b.title}" from the library? Its files stay on disk.`) ? api.books.remove(b.id, false) : null)) },
       {
         label: 'Delete book',
         danger: true,
-        run: run(async () => (confirm(`Delete "${b.title}"? Its folder will be moved to the system trash.`) ? api.books.remove(b.id, true) : null))
+        run: run(async () => (confirm(`Delete "${b.title}" and all its notes? This can't be undone; export it first to keep a copy.`) ? api.books.remove(b.id) : null))
       }
     ])
   return el
 }
 
-// Main page: a grid of book covers, plus "New book" and "Open folder as book".
+// Main page: a grid of book covers, plus "New book" and "Import".
 export async function showLibrary(root: HTMLElement): Promise<void> {
   document.title = 'Library'
   root.className = 'library'
@@ -122,7 +121,14 @@ export async function showLibrary(root: HTMLElement): Promise<void> {
     h('header', {},
       h('h1', { textContent: 'Library' }),
       search,
-      h('button', { textContent: 'Open folder as book', onclick: async () => report(await api.books.pick()) }),
+      h('button', {
+        textContent: 'Import…',
+        onclick: (ev: MouseEvent) =>
+          showMenu(ev, [
+            { label: 'Folder…', run: async () => report(await api.books.import(false)) },
+            { label: '.zip file…', run: async () => report(await api.books.import(true)) }
+          ])
+      }),
       h('button', { class: 'icon', title: 'Settings', textContent: '⚙', onclick: () => openSettings() })
     ),
     error,

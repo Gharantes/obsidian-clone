@@ -154,11 +154,8 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
 
   async function remove(e: Entry) {
     const what = e.folder ? `the folder "${label(e)}" and everything in it` : `"${label(e)}"`
-    if (!confirm(`Delete ${what}? It will be moved to the system trash.`)) return
-    if (!(await files().trash(e.path))) {
-      if (!confirm(`Couldn't move "${label(e)}" to the system trash. Delete it permanently?`)) return
-      await files().remove(e.path)
-    }
+    if (!confirm(`Delete ${what}? This can't be undone.`)) return
+    await files().remove(e.path)
     if (active && movePath(active, e.path, '') !== active) active = null
     h.deleted(e.path)
     refresh()
@@ -208,7 +205,6 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
       { label: 'New folder', run: () => create(true) }
     ])
   dropTarget(list, '')
-  files().onChange(refresh)
   refresh()
   return { create, refresh }
 }

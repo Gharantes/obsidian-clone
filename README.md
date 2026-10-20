@@ -1,3 +1,27 @@
 # obsidian-clone
 
-A clone of [Obsidian](https://obsidian.md), the Markdown knowledge base app.
+A clone of [Obsidian](https://obsidian.md), the Markdown knowledge base app, shaped around writing books.
+
+- **Library**: the main page is a grid of books. Create a book (title + cover color) or open any folder as a book.
+  New books go in `Documents/Books` (change it in Settings).
+- **Books**: each book is a folder of Markdown notes, organized in Obsidian's *folder note* style: a folder `Chapter 1`
+  with a note `Chapter 1/Chapter 1.md` shows as one item that opens its note. Right-click a note → *New note inside* to
+  nest notes under it; drag items to move them.
+- **AI writing**: in a note press **Ctrl+J** (or the ✨ AI button). Type an instruction to write at the cursor, use
+  *Continue writing*, or select text to *Rewrite* it. Text streams in highlighted; **Keep** or **Discard**.
+  The AI sees the book outline, parent folder notes and the current note.
+
+## AI providers
+
+- **Claude Code** (default): uses your Claude subscription through `claude -p`, no API key. Install Claude Code and run
+  `claude` once to log in. The app finds it on PATH, in `~/.local/bin`, or bundled with the VS Code extension.
+- **OpenAI-compatible API**: Ollama, LM Studio, Gemini, Groq, OpenRouter… see [FREE_AI_OPTIONS.md](FREE_AI_OPTIONS.md).
+
+## Develop
+
+```sh
+npm install
+npm run dev        # run the app
+npm test           # unit tests
+npm run typecheck
+```

@@ -60,6 +60,12 @@ Tick each one only after you tried it in the running app.
 - [ ] Command palette (Ctrl+P)
 - [ ] Graph view
 
+**Books & AI**
+- [x] Library grid as the main page (create / rename / recolor / delete books)
+- [x] Folder notes (folder `X` + note `X/X.md` act as one item; nest notes; drag to move)
+- [x] AI writing with Claude Code (Ctrl+J: write, continue, rewrite selection)
+- [x] OpenAI-compatible provider for free options (see `FREE_AI_OPTIONS.md`)
+
 **Later**: settings screen, themes, plugin API, tabs/splits.
 
 Shortcut: Obsidian's public plugin API types (`npm view obsidian`) name most internal

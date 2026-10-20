@@ -1,114 +1,234 @@
 import { app, BrowserWindow, dialog, ipcMain, shell, type IpcMainInvokeEvent } from 'electron'
-import { mkdirSync, readFileSync, rmSync, watch, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, readFileSync, rmSync, statSync, watch, writeFileSync, type FSWatcher } from 'node:fs'
+import { basename, dirname, join } from 'node:path'
 import { addVault, loadRegistry, saveRegistry, type Registry } from './vaults.ts'
-import { availablePath, inVault, listTree, renameEntry } from './files.ts'
+import { createEntry, inVault, listTree, moveEntry, nestNote, renameEntry } from './files.ts'
+import { COVERS, countNotes, createBook, readMeta, writeMeta } from './books.ts'
+import { loadSettings, saveSettings, type Settings } from './settings.ts'
+import { buildPrompt, outline, parentNotes, SYSTEM, type AiRequest } from './prompt.ts'
+import { claudeCode, findClaude, openaiCompatible, type Generate } from './ai.ts'
 
-const registryFile = () => join(app.getPath('userData'), 'vaults.json')
+const userFile = (name: string) => join(app.getPath('userData'), name)
 let vaults: Registry = {}
-const vaultWindows = new Map<string, BrowserWindow>()
-let picker: BrowserWindow | null = null
+let settings: Settings
 let quitting = false
 
-const save = () => saveRegistry(registryFile(), vaults)
+// Every window shows the library (vault null) or one book.
+type Win = { vault: string | null; watcher?: FSWatcher }
+const windows = new Map<BrowserWindow, Win>()
 
-function createWindow(): BrowserWindow {
+const save = () => saveRegistry(userFile('vaults.json'), vaults)
+const library = () => settings.library || join(app.getPath('documents'), 'Books')
+
+function createWindow(vault: string | null): BrowserWindow {
   const win = new BrowserWindow({
-    width: 1100,
-    height: 750,
+    width: 1200,
+    height: 800,
     webPreferences: { preload: join(__dirname, '../preload/index.js') }
   })
+  windows.set(win, { vault: null })
+  if (vault) attach(win, vault)
   // electron-vite sets this in dev; in builds load the bundled file.
   if (process.env.ELECTRON_RENDERER_URL) win.loadURL(process.env.ELECTRON_RENDERER_URL)
   else win.loadFile(join(__dirname, '../renderer/index.html'))
-  return win
-}
-
-function showPicker(): void {
-  if (picker) return picker.focus()
-  picker = createWindow()
-  picker.on('closed', () => (picker = null))
-}
-
-function openVaultWindow(id: string): void {
-  const existing = vaultWindows.get(id)
-  if (existing) return existing.focus()
-
-  const win = createWindow()
-  vaultWindows.set(id, win)
-  vaults[id].open = true
-  save()
-
-  // Tell the renderer when anything in the vault changes on disk (debounced).
-  let timer: NodeJS.Timeout | undefined
-  const watcher = watch(vaults[id].path, { recursive: true }, () => {
-    clearTimeout(timer)
-    timer = setTimeout(() => win.isDestroyed() || win.webContents.send('fs:changed'), 100)
-  }).on('error', () => {})
-
   win.on('closed', () => {
-    watcher.close()
-    vaultWindows.delete(id)
+    const w = windows.get(win)!
+    w.watcher?.close()
+    windows.delete(win)
     // Keep the flag on quit or when the last window closes, so the next launch reopens it.
-    if (!quitting && vaultWindows.size > 0) {
-      delete vaults[id].open
+    if (w.vault && !quitting && windows.size > 0) {
+      delete vaults[w.vault].open
       save()
     }
   })
+  return win
 }
 
-// Opens a folder as a vault; returns an error message or null.
-function openVault(path: string): string | null {
+// Points a window at a book (or back at the library) and watches the book folder.
+function attach(win: BrowserWindow, id: string | null): void {
+  const w = windows.get(win)!
+  w.watcher?.close()
+  w.watcher = undefined
+  if (w.vault && w.vault !== id) delete vaults[w.vault].open
+  w.vault = id
+  if (id) {
+    vaults[id].open = true
+    // Tell the renderer when anything in the book changes on disk (debounced).
+    let timer: NodeJS.Timeout | undefined
+    w.watcher = watch(vaults[id].path, { recursive: true }, () => {
+      clearTimeout(timer)
+      timer = setTimeout(() => win.isDestroyed() || win.webContents.send('fs:changed'), 100)
+    }).on('error', () => {})
+  }
+  save()
+}
+
+const windowOf = (e: IpcMainInvokeEvent) => BrowserWindow.fromWebContents(e.sender)!
+const windowWith = (id: string) => [...windows].find(([, w]) => w.vault === id)?.[0]
+
+// Opens a folder as a book in the calling window (or focuses the window that has it).
+function openBook(e: IpcMainInvokeEvent, path: string, newWindow = false): string | null {
   const result = addVault(vaults, path)
   if ('error' in result) return result.error
   save()
-  openVaultWindow(result.id)
   app.addRecentDocument(path)
-  picker?.close()
+  const other = windowWith(result.id)
+  if (other) other.focus()
+  else if (newWindow) createWindow(result.id)
+  else {
+    attach(windowOf(e), result.id)
+    e.sender.reload()
+  }
   return null
 }
 
-ipcMain.handle('vault:list', () =>
+// --- Books (library page) ---
+
+ipcMain.handle('book:list', () =>
   Object.entries(vaults)
-    .map(([id, v]) => ({ id, ...v }))
+    .map(([id, v]) => {
+      const missing = !statSync(v.path, { throwIfNoEntry: false })?.isDirectory()
+      return { id, path: v.path, ts: v.ts, title: basename(v.path), missing, notes: missing ? 0 : countNotes(v.path), ...readMeta(v.path) }
+    })
     .sort((a, b) => b.ts - a.ts)
 )
-ipcMain.handle('vault:current', (e) => {
-  for (const [id, win] of vaultWindows) if (win.webContents === e.sender) return { id, path: vaults[id].path }
+ipcMain.handle('book:covers', () => COVERS)
+ipcMain.handle('book:create', (e, title: string, color: string) => {
+  const r = createBook(library(), title, color)
+  return 'error' in r ? r.error : openBook(e, r.path)
+})
+ipcMain.handle('book:open', (e, id: string, newWindow?: boolean) => openBook(e, vaults[id].path, newWindow))
+ipcMain.handle('book:pick', async (e) => {
+  const r = await dialog.showOpenDialog(windowOf(e), { properties: ['openDirectory', 'createDirectory'] })
+  return r.canceled ? null : openBook(e, r.filePaths[0])
+})
+ipcMain.handle('book:close', (e) => {
+  attach(windowOf(e), null)
+  e.sender.reload()
+})
+ipcMain.handle('book:current', (e) => {
+  const id = windows.get(windowOf(e))?.vault
+  return id ? { id, path: vaults[id].path, title: basename(vaults[id].path) } : null
+})
+ipcMain.handle('book:rename', (_e, id: string, title: string) => {
+  if (windowWith(id)) return 'Close the book before renaming it'
+  const path = vaults[id].path
+  const r = renameEntry(dirname(path), basename(path), title)
+  if ('error' in r) return r.error
+  vaults[id].path = join(dirname(path), r.path)
+  save()
   return null
 })
-ipcMain.handle('vault:open', (_e, path: string) => openVault(path))
-ipcMain.handle('vault:pick', async (e) => {
-  const win = BrowserWindow.fromWebContents(e.sender)!
-  const r = await dialog.showOpenDialog(win, { properties: ['openDirectory', 'createDirectory'] })
-  return r.canceled ? null : openVault(r.filePaths[0])
+ipcMain.handle('book:color', (_e, id: string, color: string) => writeMeta(vaults[id].path, { ...readMeta(vaults[id].path), color }))
+ipcMain.handle('book:reveal', (_e, id: string) => shell.openPath(vaults[id].path))
+// Forgets a book; with `trash` also moves its folder to the OS trash.
+ipcMain.handle('book:remove', async (_e, id: string, trash: boolean) => {
+  if (windowWith(id)) return 'Close the book first'
+  if (trash && existsSync(vaults[id].path)) {
+    const ok = await shell.trashItem(vaults[id].path).then(() => true, () => false)
+    if (!ok) return "Couldn't move the folder to the trash"
+  }
+  delete vaults[id]
+  save()
+  return null
 })
 
-// Folder of the vault that owns the calling window.
+// --- Files inside the window's book ---
+
+// Folder of the book that owns the calling window.
 function vaultOf(e: IpcMainInvokeEvent): string {
-  for (const [id, win] of vaultWindows) if (win.webContents === e.sender) return vaults[id].path
-  throw new Error('Window has no vault')
+  const id = windows.get(windowOf(e))?.vault
+  if (!id) throw new Error('Window has no book')
+  return vaults[id].path
 }
 
 ipcMain.handle('fs:list', (e) => listTree(vaultOf(e)))
 ipcMain.handle('fs:read', (e, rel: string) => readFileSync(inVault(vaultOf(e), rel), 'utf8'))
 ipcMain.handle('fs:write', (e, rel: string, text: string) => writeFileSync(inVault(vaultOf(e), rel), text))
 ipcMain.handle('fs:rename', (e, rel: string, name: string) => renameEntry(vaultOf(e), rel, name))
+ipcMain.handle('fs:nest', (e, rel: string) => nestNote(vaultOf(e), rel))
+ipcMain.handle('fs:move', (e, rel: string, dest: string) => moveEntry(vaultOf(e), rel, dest))
 // Moves to the OS trash; false when the filesystem has none (e.g. tmpfs).
 ipcMain.handle('fs:trash', (e, rel: string) => shell.trashItem(inVault(vaultOf(e), rel)).then(() => true, () => false))
 ipcMain.handle('fs:remove', (e, rel: string) => rmSync(inVault(vaultOf(e), rel), { recursive: true }))
-ipcMain.handle('fs:create', (e, folder: boolean) => {
-  const root = vaultOf(e)
-  const path = availablePath(root, 'Untitled', folder ? '' : 'md')
-  if (folder) mkdirSync(inVault(root, path))
-  else writeFileSync(inVault(root, path), '')
-  return path
+ipcMain.handle('fs:create', (e, folder: boolean, parent = '') => createEntry(vaultOf(e), parent, folder))
+
+// --- Settings ---
+
+// The renderer never sees the stored API key, only whether there is one.
+const publicSettings = () => ({ ...settings, library: library(), ai: { ...settings.ai, openai: { ...settings.ai.openai, apiKey: settings.ai.openai.apiKey ? '••••••••' : '' } } })
+
+ipcMain.handle('settings:get', () => publicSettings())
+ipcMain.handle('settings:set', (_e, s: Settings) => {
+  const key = s.ai.openai.apiKey === '••••••••' ? settings.ai.openai.apiKey : s.ai.openai.apiKey
+  settings = { ...s, ai: { ...s.ai, openai: { ...s.ai.openai, apiKey: key } } }
+  saveSettings(userFile('settings.json'), settings)
+  return publicSettings()
+})
+ipcMain.handle('settings:pickLibrary', async (e) => {
+  const r = await dialog.showOpenDialog(windowOf(e), { defaultPath: library(), properties: ['openDirectory', 'createDirectory'] })
+  return r.canceled ? null : r.filePaths[0]
+})
+
+// --- AI ---
+
+async function generator(): Promise<Generate> {
+  const ai = settings.ai
+  if (ai.provider === 'openai') return openaiCompatible(ai.openai)
+  const path = await findClaude(ai.claudePath)
+  if (!path)
+    throw new Error(
+      ai.claudePath
+        ? `Claude Code not found at ${ai.claudePath}`
+        : 'Claude Code not found. Install it (npm i -g @anthropic-ai/claude-code), then run `claude` once to log in, or set its path in Settings.'
+    )
+  return claudeCode(path, ai.claudeModel, userFile('ai-workdir'))
+}
+
+const jobs = new Map<string, AbortController>()
+
+// Streams generated text to the renderer as ai:chunk events; resolves to an error message or null.
+ipcMain.handle('ai:generate', async (e, id: string, req: AiRequest) => {
+  const abort = new AbortController()
+  jobs.set(id, abort)
+  try {
+    const root = vaultOf(e)
+    const parents = parentNotes(req.path)
+      .filter((p) => existsSync(inVault(root, p)))
+      .map((p) => ({ title: basename(p, '.md'), text: readFileSync(inVault(root, p), 'utf8') }))
+    const prompt = buildPrompt({ ...req, book: basename(root), outline: outline(listTree(root), req.path), parents })
+    const run = await generator()
+    await run(prompt, SYSTEM, (text) => e.sender.isDestroyed() || e.sender.send('ai:chunk', id, text), abort.signal)
+    return null
+  } catch (err) {
+    return (err as Error).message
+  } finally {
+    jobs.delete(id)
+  }
+})
+ipcMain.handle('ai:cancel', (_e, id: string) => jobs.get(id)?.abort())
+ipcMain.handle('ai:detectClaude', () => findClaude(''))
+// Sends a tiny prompt with the current settings; resolves to { text } or { error }.
+ipcMain.handle('ai:test', async () => {
+  let text = ''
+  try {
+    const run = await generator()
+    await run('Reply with exactly: Hello from your AI provider!', SYSTEM, (t) => (text += t), new AbortController().signal)
+    return { text }
+  } catch (err) {
+    return { error: (err as Error).message }
+  }
 })
 
 app.whenReady().then(() => {
-  vaults = loadRegistry(registryFile())
-  for (const id in vaults) if (vaults[id].open && openVault(vaults[id].path)) delete vaults[id].open
-  if (vaultWindows.size === 0) showPicker()
+  vaults = loadRegistry(userFile('vaults.json'))
+  settings = loadSettings(userFile('settings.json'))
+  for (const id in vaults) {
+    if (!vaults[id].open) continue
+    if (statSync(vaults[id].path, { throwIfNoEntry: false })?.isDirectory()) createWindow(id)
+    else delete vaults[id].open
+  }
+  if (windows.size === 0) createWindow(null)
 })
 app.on('before-quit', () => (quitting = true))
 app.on('window-all-closed', () => app.quit())

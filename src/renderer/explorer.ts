@@ -1,4 +1,5 @@
 import type { Entry } from '../main/files.ts'
+import { showMenu, type MenuItem } from './ui.ts'
 
 type Handlers = {
   open(path: string): void
@@ -9,10 +10,16 @@ type Handlers = {
 const files = () => window.api.files
 const isNote = (e: Entry) => !e.folder && e.name.endsWith('.md')
 const label = (e: Entry) => (isNote(e) ? e.name.slice(0, -3) : e.name)
+const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
+export const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf('/')))
 
-// Path after `from` was renamed to `to` (unchanged when unrelated).
-export const movePath = (p: string, from: string, to: string) =>
-  p === from || p.startsWith(from + '/') ? to + p.slice(from.length) : p
+// Path after `from` was renamed or moved to `to` (unchanged when unrelated). Renaming a folder
+// renames its folder note too: "A/A.md" becomes "B/B.md".
+export function movePath(p: string, from: string, to: string): string {
+  if (p !== from && !p.startsWith(from + '/')) return p
+  if (to && p === `${from}/${baseName(from)}.md`) return `${to}/${baseName(to)}.md`
+  return to + p.slice(from.length)
+}
 
 function find(entries: Entry[], path: string): Entry | undefined {
   for (const e of entries) {
@@ -22,32 +29,62 @@ function find(entries: Entry[], path: string): Entry | undefined {
   }
 }
 
-// File tree: folders first, click a note to open it, right-click to rename or delete.
+// File tree in folder-note style: a folder with a note of the same name shows as one item that
+// opens the note; its arrow expands it. Right-click for actions, drag to move.
 export function createExplorer(list: HTMLElement, h: Handlers) {
   let tree: Entry[] = []
   let active: string | null = null
   let renaming = false
+  let dragging: string | null = null
   const expanded = new Set<string>()
-
-  const menu = document.body.appendChild(document.createElement('div'))
-  menu.className = 'menu'
-  menu.hidden = true
-  document.addEventListener('click', () => (menu.hidden = true))
 
   function render(entries: Entry[]): HTMLLIElement[] {
     return entries.map((e) => {
       const li = document.createElement('li')
       const row = li.appendChild(document.createElement('div'))
-      row.className = ['row', e.folder && 'folder', expanded.has(e.path) && 'open', e.path === active && 'active', !e.folder && !isNote(e) && 'other']
+      const open = expanded.has(e.path)
+      row.className = ['row', e.folder && 'folder', open && 'open', e.note && 'has-note', (e.path === active || e.note === active) && 'active', !e.folder && !isNote(e) && 'other']
         .filter(Boolean)
         .join(' ')
-      row.textContent = label(e)
       row.dataset.path = e.path
-      row.onclick = () => (e.folder ? toggle(e.path) : isNote(e) && open(e.path))
-      row.oncontextmenu = (ev) => showMenu(ev, e, row)
-      if (e.folder && expanded.has(e.path)) li.appendChild(document.createElement('ul')).append(...render(e.children!))
+      if (e.folder) {
+        const arrow = row.appendChild(document.createElement('span'))
+        arrow.className = 'arrow'
+        arrow.onclick = (ev) => (ev.stopPropagation(), toggle(e.path))
+        if (!e.children!.length) arrow.classList.add('none')
+      }
+      row.appendChild(document.createElement('span')).textContent = label(e)
+      row.onclick = () => (e.note ? (expanded.add(e.path), openNote(e.note)) : e.folder ? toggle(e.path) : isNote(e) && openNote(e.path))
+      row.oncontextmenu = (ev) => showMenu(ev, menuFor(e, row))
+      row.draggable = true
+      row.ondragstart = (ev) => {
+        dragging = e.path
+        ev.dataTransfer!.effectAllowed = 'move'
+        ev.dataTransfer!.setData('text/plain', e.path)
+      }
+      row.ondragend = () => (dragging = null)
+      dropTarget(row, e.folder ? e.path : parentOf(e.path))
+      if (e.folder && open) li.appendChild(document.createElement('ul')).append(...render(e.children!))
       return li
     })
+  }
+
+  // Dropping a dragged entry on `el` moves it into folder `dest`.
+  function dropTarget(el: HTMLElement, dest: string) {
+    const ok = () => dragging !== null && parentOf(dragging) !== dest && dest !== dragging && !dest.startsWith(dragging + '/')
+    el.ondragover = (ev) => {
+      if (!ok()) return
+      ev.preventDefault()
+      ev.stopPropagation()
+      el.classList.add('drop')
+    }
+    el.ondragleave = () => el.classList.remove('drop')
+    el.ondrop = (ev) => {
+      ev.preventDefault()
+      ev.stopPropagation()
+      el.classList.remove('drop')
+      if (ok()) move(dragging!, dest)
+    }
   }
 
   const redraw = () => list.replaceChildren(...render(tree))
@@ -63,24 +100,28 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
     redraw()
   }
 
-  function open(path: string) {
+  function openNote(path: string) {
     active = path
     h.open(path)
     redraw()
   }
 
-  function showMenu(ev: MouseEvent, e: Entry, row: HTMLElement) {
-    ev.preventDefault()
-    const item = (text: string, run: () => void) => {
-      const b = document.createElement('button')
-      b.textContent = text
-      b.onclick = run
-      return b
-    }
-    menu.replaceChildren(item('Rename', () => startRename(e, row)), item('Delete', () => remove(e)))
-    menu.style.left = `${ev.clientX}px`
-    menu.style.top = `${ev.clientY}px`
-    menu.hidden = false
+  // Keeps the open note, expanded folders and editor in step with a rename or move.
+  function moved(from: string, to: string) {
+    if (active) active = movePath(active, from, to)
+    for (const p of [...expanded]) expanded.delete(p) && expanded.add(movePath(p, from, to))
+    h.renamed(from, to)
+  }
+
+  function menuFor(e: Entry, row: HTMLElement): MenuItem[] {
+    const items: MenuItem[] = []
+    if (e.folder) {
+      items.push({ label: 'New note', run: () => create(false, e.path) }, { label: 'New folder', run: () => create(true, e.path) })
+      if (!e.note) items.push({ label: 'Create folder note', run: () => createFolderNote(e) })
+      items.push('-')
+    } else if (isNote(e)) items.push({ label: 'New note inside', run: () => nestAndCreate(e) }, '-')
+    items.push({ label: 'Rename', run: () => startRename(e, row) }, { label: 'Delete', danger: true, run: () => remove(e) })
+    return items
   }
 
   function startRename(e: Entry, row: HTMLElement) {
@@ -89,6 +130,7 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
     input.value = label(e)
     renaming = true
     row.replaceChildren(input)
+    row.draggable = false
     input.focus()
     input.select()
 
@@ -100,11 +142,7 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
       if (commit && name !== e.name) {
         const r = await files().rename(e.path, name)
         if ('error' in r) alert(r.error)
-        else {
-          if (active) active = movePath(active, e.path, r.path)
-          for (const p of [...expanded]) expanded.delete(p) && expanded.add(movePath(p, e.path, r.path))
-          h.renamed(e.path, r.path)
-        }
+        else moved(e.path, r.path)
       }
       renaming = false
       refresh()
@@ -115,7 +153,8 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
   }
 
   async function remove(e: Entry) {
-    if (!confirm(`Delete "${label(e)}"? It will be moved to the system trash.`)) return
+    const what = e.folder ? `the folder "${label(e)}" and everything in it` : `"${label(e)}"`
+    if (!confirm(`Delete ${what}? It will be moved to the system trash.`)) return
     if (!(await files().trash(e.path))) {
       if (!confirm(`Couldn't move "${label(e)}" to the system trash. Delete it permanently?`)) return
       await files().remove(e.path)
@@ -125,18 +164,51 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
     refresh()
   }
 
-  // Creates "Untitled" at the vault root and starts renaming it.
-  async function create(folder: boolean) {
-    const path = await files().create(folder)
+  async function move(path: string, dest: string) {
+    const r = await files().move(path, dest)
+    if ('error' in r) return alert(r.error)
+    if (dest) expanded.add(dest)
+    moved(path, r.path)
+    refresh()
+  }
+
+  // Creates "Untitled" in `parent` ('' = root), opens it and starts renaming it.
+  // New folders come with a folder note, so they open like notes.
+  async function create(folder: boolean, parent = '') {
+    const path = await files().create(folder, parent)
+    for (let p = parent; p; p = parentOf(p)) expanded.add(p)
     tree = await files().list()
-    if (folder) redraw()
-    else open(path)
-    const row = list.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`)
     const entry = find(tree, path)
+    const note = folder ? entry?.note : path
+    if (note) openNote(note)
+    else redraw()
+    const row = list.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`)
     if (row && entry) startRename(entry, row)
   }
 
+  async function createFolderNote(e: Entry) {
+    const path = `${e.path}/${e.name}.md`
+    await files().write(path, '')
+    expanded.add(e.path)
+    tree = await files().list()
+    openNote(path)
+  }
+
+  // Turns a note into a folder note, then creates a new note inside it.
+  async function nestAndCreate(e: Entry) {
+    const r = await files().nest(e.path)
+    if ('error' in r) return alert(r.error)
+    moved(e.path, r.path)
+    await create(false, parentOf(r.path))
+  }
+
+  list.oncontextmenu = (ev) =>
+    showMenu(ev, [
+      { label: 'New note', run: () => create(false) },
+      { label: 'New folder', run: () => create(true) }
+    ])
+  dropTarget(list, '')
   files().onChange(refresh)
   refresh()
-  return { create }
+  return { create, refresh }
 }

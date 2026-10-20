@@ -9,7 +9,7 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "postinstall": "install-electron",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"src/**/*.test.ts\""
+    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --test \"src/**/*.test.ts\""
   },
   "devDependencies": {
     "@types/node": "^26.6.5",

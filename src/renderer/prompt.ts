@@ -1,4 +1,4 @@
-import type { Entry } from './files.ts'
+import type { Entry } from './api.ts'
 
 export type Mode = 'write' | 'continue' | 'rewrite'
 

@@ -1,4 +1,4 @@
-import type { Entry } from '../main/files.ts'
+import type { Entry } from './api.ts'
 import { showMenu, type MenuItem } from './ui.ts'
 
 type Handlers = {

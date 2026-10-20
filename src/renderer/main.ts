@@ -1,12 +1,7 @@
-import type { Api } from '../preload/index.ts'
+// Sets window.api; imported first because other modules use it as they load.
+import './api.ts'
 import { showBook } from './book.ts'
 import { showLibrary } from './library.ts'
-
-declare global {
-  interface Window {
-    api: Api
-  }
-}
 
 // Each window shows either the library or one book; switching between them reloads the window.
 const root = document.getElementById('app')!

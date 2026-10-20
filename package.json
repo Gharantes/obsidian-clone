@@ -2,19 +2,19 @@
   "name": "obsidian-clone",
   "version": "0.0.1",
   "private": true,
-  "main": "out/main/index.js",
   "scripts": {
-    "dev": "electron-vite dev",
-    "build": "electron-vite build",
-    "start": "electron-vite preview",
+    "dev": "tauri dev",
+    "build": "tauri build",
     "typecheck": "tsc --noEmit",
-    "postinstall": "install-electron",
-    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --test \"src/**/*.test.ts\""
+    "test": "node --experimental-strip-types --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --test \"src/**/*.test.ts\"",
+    "tauri": "tauri",
+    "web:dev": "vite",
+    "web:build": "vite build",
+    "test:rust": "cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.12.3",
     "@types/node": "^26.6.5",
-    "electron": "^44.7.2",
-    "electron-vite": "^6.0.0",
     "typescript": "^7.0.2",
     "vite": "^8.3.4"
   },
@@ -24,6 +24,8 @@
     "@codemirror/state": "^6.7.6",
     "@codemirror/view": "^6.43.14",
     "@lezer/highlight": "^1.2.5",
+    "@tauri-apps/api": "^2.12.4",
     "codemirror": "^6.0.2"
-  }
+  },
+  "type": "module"
 }

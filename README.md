@@ -19,9 +19,14 @@ A clone of [Obsidian](https://obsidian.md), the Markdown knowledge base app, sha
 
 ## Develop
 
+Built with [Tauri](https://tauri.app): the UI is in `src/renderer`, the Rust backend in `src-tauri`.
+Needs Node and [Rust](https://rustup.rs) (plus the [Tauri prerequisites](https://tauri.app/start/prerequisites/) on Linux).
+
 ```sh
 npm install
-npm run dev        # run the app
-npm test           # unit tests
+npm run tauri dev  # run the app (same as npm run dev)
+npm run build      # installers in src-tauri/target/release/bundle
+npm test           # frontend unit tests
+npm run test:rust  # backend unit tests
 npm run typecheck
 ```

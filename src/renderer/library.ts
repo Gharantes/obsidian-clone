@@ -1,4 +1,4 @@
-import type { Book } from '../preload/index.ts'
+import type { Book } from './api.ts'
 import { openSettings } from './settings.ts'
 import { ago, ask, h, modal, showMenu } from './ui.ts'
 

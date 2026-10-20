@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Lets every window listen to the events the backend sends it.",
+  "windows": ["*"],
+  "permissions": ["core:default"]
+}

@@ -1,6 +1,6 @@
 import { Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
 import { Decoration, EditorView, keymap } from '@codemirror/view'
-import type { Mode } from '../main/prompt.ts'
+import type { Mode } from './prompt.ts'
 import { h } from './ui.ts'
 
 // While a generation is shown: `orig` is the selected text being rewritten (empty when writing at

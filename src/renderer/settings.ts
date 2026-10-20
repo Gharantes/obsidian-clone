@@ -1,4 +1,4 @@
-import type { Settings } from '../main/settings.ts'
+import type { Settings } from './api.ts'
 import { h, modal } from './ui.ts'
 
 const { api } = window

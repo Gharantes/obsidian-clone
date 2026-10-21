@@ -42,7 +42,9 @@ async function newBook(covers: string[]): Promise<void> {
     // On success the window reloads into the new book.
   }
   input.oninput = paint
-  input.onkeydown = (k) => k.key === 'Enter' && create()
+  input.onkeydown = (k) => {
+    if (k.key === 'Enter') create()
+  }
   const body = h('div', { class: 'new-book' }, preview, h('div', {}, input, swatches, error))
   const dlg = modal('New book', [body], [
     h('button', { textContent: 'Cancel', onclick: () => dlg.close() }),
@@ -74,7 +76,9 @@ function generateCover(b: Book): Promise<void> {
       dlg.close()
     }
     const go = h('button', { class: 'primary', textContent: 'Generate', onclick: draw })
-    input.onkeydown = (k) => k.key === 'Enter' && draw()
+    input.onkeydown = (k) => {
+      if (k.key === 'Enter') draw()
+    }
     const cancel = h('button', { textContent: 'Cancel', onclick: () => dlg.close() })
     const dlg = modal('Generate cover image', [input, status], [cancel, go], () => (api.ai.cancel(job), resolve()))
     input.focus()
@@ -93,7 +97,9 @@ function card(b: Book, covers: string[], reload: () => void, report: (e: string 
   const el = h('div', { class: 'book', tabIndex: 0 }, cover, h('b', { textContent: b.title }), h('small', { textContent: meta }))
   const open = async () => report(await api.books.open(b.id))
   el.onclick = open
-  el.onkeydown = (k) => k.key === 'Enter' && open()
+  el.onkeydown = (k) => {
+    if (k.key === 'Enter') open()
+  }
 
   const run = (f: () => Promise<string | null | void>) => async () => {
     report((await f()) || null)

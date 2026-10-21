@@ -82,7 +82,9 @@ export function ask(
     const ok = h('button', { class: 'primary', textContent: opts.ok ?? 'OK', onclick: submit })
     const cancel = h('button', { textContent: 'Cancel', onclick: () => dlg.close() })
     const dlg = modal(title, [input, error], [cancel, ok], () => resolve(result))
-    input.onkeydown = (k) => k.key === 'Enter' && submit()
+    input.onkeydown = (k) => {
+      if (k.key === 'Enter') submit()
+    }
     input.focus()
     input.select()
   })

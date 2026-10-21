@@ -147,7 +147,10 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
       renaming = false
       refresh()
     }
-    input.onkeydown = (k) => (k.key === 'Enter' ? finish(true) : k.key === 'Escape' && finish(false))
+    input.onkeydown = (k) => {
+      if (k.key === 'Enter') finish(true)
+      else if (k.key === 'Escape') finish(false)
+    }
     input.onblur = () => finish(true)
     input.onclick = (ev) => ev.stopPropagation()
   }

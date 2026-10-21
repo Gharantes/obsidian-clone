@@ -17,6 +17,26 @@ export const PRESETS: { name: string; baseUrl: string; model: string; key: strin
 
 const field = (label: string, ...control: (Node | string)[]) => h('label', { class: 'field' }, h('span', { textContent: label }), ...control)
 
+const SOURCES = {
+  ai: { 'claude-code': 'Claude Code', openai: 'OpenAI-compatible' },
+  image: { pollinations: 'Pollinations', openai: 'OpenAI-compatible' }
+}
+
+// Compact provider dropdown; changing it saves the choice to settings.
+export function sourcePicker(kind: keyof typeof SOURCES): HTMLSelectElement {
+  const sel = h('select', { title: kind === 'ai' ? 'Where text is generated' : 'Where images are generated' },
+    ...Object.entries(SOURCES[kind]).map(([value, textContent]) => h('option', { value, textContent })))
+  // Re-read on focus so changes made in the Settings dialog show up.
+  const load = () => api.settings.get().then((s) => (sel.value = s[kind].provider))
+  sel.onfocus = load
+  sel.onchange = async () => {
+    const s = await api.settings.get()
+    await api.settings.set({ ...s, [kind]: { ...s[kind], provider: sel.value } })
+  }
+  load()
+  return sel
+}
+
 // Settings dialog: the AI writing and image providers.
 export async function openSettings(): Promise<void> {
   let s: Settings = await api.settings.get()

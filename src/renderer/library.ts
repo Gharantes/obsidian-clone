@@ -1,5 +1,5 @@
 import type { Book } from './api.ts'
-import { openSettings } from './settings.ts'
+import { openSettings, sourcePicker } from './settings.ts'
 import { ago, ask, h, modal, showMenu } from './ui.ts'
 
 const { api } = window
@@ -59,14 +59,15 @@ function generateCover(b: Book): Promise<void> {
   return new Promise((resolve) => {
     const job = crypto.randomUUID()
     const input = h('input', { value: `Book cover illustration for "${b.title}", no text` })
-    const status = h('p', { class: 'hint', textContent: 'Free via your image provider (Settings). Takes about 10 seconds.' })
+    const source = sourcePicker('image')
+    const status = h('p', { class: 'hint', textContent: 'Takes about 10 seconds.' })
     const draw = async () => {
       if (!input.value.trim()) return input.focus()
-      go.disabled = input.disabled = true
+      go.disabled = input.disabled = source.disabled = true
       status.className = 'hint'
       status.textContent = 'Drawing…'
       const r = await api.images.generate(job, input.value.trim(), 768, 1024, b.id)
-      go.disabled = input.disabled = false
+      go.disabled = input.disabled = source.disabled = false
       if ('error' in r) {
         status.className = 'error'
         status.textContent = r.error
@@ -80,7 +81,7 @@ function generateCover(b: Book): Promise<void> {
       if (k.key === 'Enter') draw()
     }
     const cancel = h('button', { textContent: 'Cancel', onclick: () => dlg.close() })
-    const dlg = modal('Generate cover image', [input, status], [cancel, go], () => (api.ai.cancel(job), resolve()))
+    const dlg = modal('Generate cover image', [input, h('label', { class: 'field' }, h('span', { textContent: 'Image source' }), source), status], [cancel, go], () => (api.ai.cancel(job), resolve()))
     input.focus()
     input.select()
   })

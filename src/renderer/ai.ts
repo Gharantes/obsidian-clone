@@ -1,6 +1,7 @@
 import { Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
 import { Decoration, EditorView, keymap } from '@codemirror/view'
 import type { Mode } from './prompt.ts'
+import { sourcePicker } from './settings.ts'
 import { h } from './ui.ts'
 
 // While a generation is shown: `orig` is the selected text being rewritten (empty when writing at
@@ -58,7 +59,9 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     retry: btn('Retry', () => (discard(), start(lastMode))),
     close: btn('×', () => hide(), 'icon')
   }
-  const bar = h('div', { class: 'ai-bar', hidden: true }, h('span', { class: 'spark', textContent: '✨' }), input, status, ...Object.values(b))
+  const textSource = sourcePicker('ai')
+  const imageSource = sourcePicker('image')
+  const bar = h('div', { class: 'ai-bar', hidden: true }, h('span', { class: 'spark', textContent: '✨' }), input, status, textSource, imageSource, ...Object.values(b))
   b.close.title = 'Close (Esc)'
   b.image.title = 'Generate an image of what you typed and insert it at the cursor'
 
@@ -74,7 +77,7 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     b.continue.hidden ||= hasSelection()
     b.generate.textContent = hasSelection() ? 'Rewrite' : 'Generate'
     input.placeholder = hasSelection() ? 'How should AI rewrite the selection? (Enter)' : 'Tell AI what to write here… (Enter)'
-    input.disabled = s !== 'idle'
+    input.disabled = textSource.disabled = imageSource.disabled = s !== 'idle'
     status.textContent = message
     status.classList.toggle('error', error)
     bar.dataset.state = s

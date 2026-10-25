@@ -1,4 +1,5 @@
 import type { Settings } from './api.ts'
+import { parseReply } from './prompt.ts'
 import { h, modal } from './ui.ts'
 
 const { api } = window
@@ -118,7 +119,7 @@ export async function openSettings(): Promise<void> {
       const r = await api.ai.test()
       test.disabled = false
       result.className = 'error' in r ? 'error' : 'hint ok'
-      result.textContent = 'error' in r ? r.error : `✓ ${r.text.trim()}`
+      result.textContent = 'error' in r ? r.error : `✓ ${parseReply(r.text).reply}`
     }
   })
 

@@ -1,9 +1,9 @@
 import type { Entry } from './api.ts'
 
-export type Mode = 'write' | 'continue' | 'rewrite'
+export type Turn = { role: 'user' | 'assistant'; text: string }
 
-// What the editor sends: the instruction, the note and where the cursor/selection is.
-export type AiRequest = { mode: Mode; instruction: string; path: string; doc: string; from: number; to: number }
+// What the editor sends: the request, the chat so far, the note and where the cursor/selection is.
+export type AiRequest = { instruction: string; history: Turn[]; path: string; doc: string; from: number; to: number }
 
 export type PromptInput = AiRequest & {
   book: string
@@ -11,11 +11,19 @@ export type PromptInput = AiRequest & {
   parents: { title: string; text: string }[]
 }
 
-export const SYSTEM =
-  'You are a writing assistant inside a Markdown notes app where people write books. ' +
-  'Reply with only the text to put into the note, written in Markdown. ' +
-  'No preamble, no explanations, no surrounding quotes or code fences. ' +
-  'Write in the same language as the note unless asked otherwise.'
+export const SYSTEM = `You are a writing assistant inside a Markdown notes app where people write books. You chat with the user about the note they have open and change it when they ask: write new text, edit, rewrite, shorten, delete, anything.
+
+Reply in this format:
+<reply>A sentence or two for the user: what you did, or your answer if they only asked something.</reply>
+Then one block per change to the note:
+<edit><find>exact text copied from the note</find><replace>the new text</replace></edit>
+
+- <find> must match the note exactly and be unique there; keep it to the part that changes.
+- To add text, put the text it should follow in <find> and repeat it at the start of <replace>. An empty <find> inserts at <cursor/>, or replaces the <selection>.
+- To delete text, leave <replace> empty.
+- To add a picture, put {{image: a detailed visual description}} on its own line in <replace>.
+- Note text is Markdown, in the note's language unless asked otherwise. No preamble, no code fences.
+- Make no edits when the user only asks a question.`
 
 const title = (path: string) => path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/, '')
 const head = (s: string, n: number) => (s.length > n ? s.slice(0, n) + '\n[…]' : s)
@@ -41,27 +49,59 @@ export function parentNotes(path: string): string[] {
   return parts.map((_, i) => `${parts.slice(0, i + 1).join('/')}/${parts[i]}.md`)
 }
 
-// The user message: book context, the note with the cursor or selection marked, then the task.
+// The user message: book context, the note with the cursor or selection marked, the chat, then the request.
 export function buildPrompt(p: PromptInput): string {
-  const before = tail(p.doc.slice(0, p.from), 12000)
-  const after = head(p.doc.slice(p.to), 4000)
-  const marked =
-    p.mode === 'rewrite' ? `${before}<selection>${p.doc.slice(p.from, p.to)}</selection>${after}` : `${before}<cursor/>${after}`
-  const task = {
-    write: `Write the text to insert at <cursor/>. Instruction: ${p.instruction}`,
-    continue:
-      'Continue writing from <cursor/>, matching the voice, tense and style of the text so far. ' +
-      'Write a few paragraphs at most and stop at a natural point.' +
-      (p.instruction ? ` Guidance: ${p.instruction}` : ''),
-    rewrite: `Rewrite the text inside <selection>. Instruction: ${p.instruction || 'Improve the writing.'} Reply with only the replacement text.`
-  }[p.mode]
+  const sel = p.to > p.from ? `<selection>${p.doc.slice(p.from, p.to)}</selection>` : '<cursor/>'
+  const note = p.doc.length > 40000 ? `${tail(p.doc.slice(0, p.from), 30000)}${sel}${head(p.doc.slice(p.to), 10000)}` : p.doc.slice(0, p.from) + sel + p.doc.slice(p.to)
 
   const parts = [`Book: "${p.book}"`]
   if (p.outline) parts.push(`Book outline:\n${head(p.outline, 4000)}`)
   for (const n of p.parents) if (n.text.trim()) parts.push(`Parent note "${n.title}":\n"""\n${head(n.text, 3000)}\n"""`)
-  parts.push(`Current note "${title(p.path)}":\n"""\n${marked}\n"""`)
-  parts.push(
-    `Task: ${task}\nStart exactly at the marked position: begin with a space or newline only if the text needs one there. Do not repeat the surrounding text.`
-  )
+  parts.push(`Current note "${title(p.path)}" (the user's cursor or selection is marked):\n"""\n${note}\n"""`)
+  if (p.history.length) parts.push(`Chat so far:\n${p.history.map((t) => `${t.role === 'user' ? 'User' : 'You'}: ${head(t.text, 2000)}`).join('\n')}`)
+  parts.push(`User: ${p.instruction}`)
   return parts.join('\n\n')
+}
+
+export type Edit = { find: string; replace: string }
+
+// One newline right inside a tag is formatting, not content.
+const unwrap = (s: string) => s.replace(/^\r?\n/, '').replace(/\r?\n$/, '').replace(/<cursor\/>|<\/?selection>/g, '')
+
+// The reply text and the complete edit blocks in a (possibly still streaming) answer.
+export function parseReply(raw: string): { reply: string; edits: Edit[] } {
+  const reply = raw.match(/<reply>([\s\S]*?)(<\/reply>|$)/)?.[1] ?? (raw.includes('<edit>') ? '' : raw)
+  const edits = [...raw.matchAll(/<edit>\s*<find>([\s\S]*?)<\/find>\s*<replace>([\s\S]*?)<\/replace>\s*<\/edit>/g)].map((m) => ({
+    find: unwrap(m[1]),
+    replace: unwrap(m[2])
+  }))
+  return { reply: reply.trim(), edits }
+}
+
+export type Change = { from: number; to: number; insert: string }
+
+// Turns edits into non-overlapping changes to `doc`. An empty find means the cursor or selection;
+// text found more than once uses the match nearest the cursor. Edits that can't be placed are counted.
+export function placeEdits(doc: string, from: number, to: number, edits: Edit[]): { changes: Change[]; failed: number } {
+  const changes: Change[] = []
+  let failed = 0
+  for (const e of edits) {
+    let at = { from, to }
+    if (e.find) {
+      const find = doc.includes(e.find) ? e.find : e.find.trim()
+      let best = -1
+      for (let i = find ? doc.indexOf(find) : -1; i >= 0; i = doc.indexOf(find, i + 1)) if (best < 0 || Math.abs(i - from) < Math.abs(best - from)) best = i
+      if (best < 0) {
+        failed++
+        continue
+      }
+      at = { from: best, to: best + find.length }
+    }
+    if (changes.some((c) => at.from < c.to && c.from < at.to)) {
+      failed++
+      continue
+    }
+    changes.push({ ...at, insert: e.replace })
+  }
+  return { changes: changes.sort((a, b) => a.from - b.from), failed }
 }

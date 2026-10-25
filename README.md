@@ -7,10 +7,10 @@ A clone of [Obsidian](https://obsidian.md), the Markdown knowledge base app, sha
 - **Books**: notes are organized in Obsidian's *folder note* style: a folder `Chapter 1` with a note
   `Chapter 1/Chapter 1.md` shows as one item that opens its note. Right-click a note → *New note inside* to nest notes
   under it; drag items to move them. Right-click a book → *Export as .zip* to get it as folders of `.md` files.
-- **AI writing**: in a note press **Ctrl+J** (or the ✨ AI button). Type an instruction to write at the cursor, use
-  *Continue writing*, or select text to *Rewrite* it. Text streams in highlighted; **Keep** or **Discard**.
-  The AI sees the book outline, parent folder notes and the current note.
-- **AI images**: in the AI bar type a description and press **🖼 Image** to insert it into the note as `![[name.jpg]]`.
+- **AI writing**: in a note press **Ctrl+J** (or the ✨ AI button) to open the AI chat sidebar. Ask for anything —
+  write something new, change or cut what's there, answer a question — and it edits the note itself, highlighting
+  what it wrote, with **Undo** on its message. The AI sees the book outline, parent folder notes and the current note.
+- **AI images**: ask the AI chat for a picture and it adds one to the note as `![[name.jpg]]`.
   Right-click a book → *Generate cover image…* for an AI cover. Free by default (Pollinations, no key); see
   [FREE_AI_OPTIONS.md](FREE_AI_OPTIONS.md#images-covers-and-pictures-in-notes). Exported zips keep images in `attachments/`.
 

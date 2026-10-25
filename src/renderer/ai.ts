@@ -1,221 +1,188 @@
-import { Compartment, EditorState, StateEffect, StateField, Transaction } from '@codemirror/state'
-import { Decoration, EditorView, keymap } from '@codemirror/view'
-import type { Mode } from './prompt.ts'
+import { StateEffect, StateField, type Text } from '@codemirror/state'
+import { Decoration, EditorView, keymap, type DecorationSet } from '@codemirror/view'
+import { parseReply, placeEdits, type Edit, type Turn } from './prompt.ts'
 import { sourcePicker } from './settings.ts'
 import { h } from './ui.ts'
 
-// While a generation is shown: `orig` is the selected text being rewritten (empty when writing at
-// the cursor) and `gen` the generated text streaming in right after it. The original stays in the
-// note, struck through, until Keep replaces it; Discard just drops `gen`, so undo history is intact.
-type Span = { from: number; to: number }
-type Spans = { orig: Span; gen: Span }
-
-const setSpans = StateEffect.define<Spans | null>()
-const oldMark = Decoration.mark({ class: 'cm-ai-old' })
-const newMark = Decoration.mark({ class: 'cm-ai-text' })
-const spans = StateField.define<Spans | null>({
-  create: () => null,
-  update(s, tr) {
-    for (const e of tr.effects) if (e.is(setSpans)) return e.value
-    if (!s || !tr.docChanged) return s
-    const map = (r: Span, grow: boolean) => ({ from: tr.changes.mapPos(r.from, -1), to: tr.changes.mapPos(r.to, grow ? 1 : -1) })
-    return { orig: map(s.orig, false), gen: map(s.gen, true) }
+// Text the AI just wrote stays highlighted until the next edit.
+const setAdded = StateEffect.define<DecorationSet>()
+const addedMark = Decoration.mark({ class: 'cm-ai-text' })
+const added = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update(d, tr) {
+    for (const e of tr.effects) if (e.is(setAdded)) return e.value
+    return tr.docChanged ? Decoration.none : d
   },
-  provide: (f) =>
-    EditorView.decorations.from(f, (s) => {
-      if (!s) return Decoration.none
-      const marks = []
-      if (s.orig.to > s.orig.from) marks.push(oldMark.range(s.orig.from, s.orig.to))
-      if (s.gen.to > s.gen.from) marks.push(newMark.range(s.gen.from, s.gen.to))
-      return Decoration.set(marks)
-    })
+  provide: (f) => EditorView.decorations.from(f)
 })
-const lock = new Compartment()
-const noHistory = Transaction.addToHistory.of(false)
 
 const listeners = new Map<string, (text: string) => void>()
 window.api.ai.onChunk((id, text) => listeners.get(id)?.(text))
 
-type State = 'idle' | 'running' | 'review'
+const IMAGE = /\{\{image:\s*([^}]*)\}\}/g
 
-// AI sidebar for the editor (Ctrl/Cmd+J). Drag its left edge to resize it. One button writes text:
-// it rewrites the selection, writes what the prompt asks at the cursor, or with an empty prompt
-// continues the note. Text streams into the note, then Keep (one undo step) or Discard.
-// Image draws the typed description and embeds it at the cursor as ![[name]].
+// AI chat sidebar for the editor (Ctrl/Cmd+J). Ask for anything; the AI answers and edits the note
+// itself (one undo step, with an Undo button on its message). Drag the left edge to resize.
 export function createAi(view: EditorView, getPath: () => string | null) {
-  let state: State = 'idle'
+  const history: Turn[] = []
   let job: string | null = null
+  let stopped = false
+  let undo: { after: Text; el: HTMLElement } | null = null
 
-  const input = h('textarea', { placeholder: '' })
-  const status = h('span', { class: 'status' })
-  const btn = (text: string, run: () => void, cls = '') => h('button', { textContent: text, className: cls, onclick: run })
-  const b = {
-    image: btn('🖼 Image', () => image()),
-    write: btn('Write', () => start(), 'primary'),
-    stop: btn('Stop', () => job && window.api.ai.cancel(job)),
-    keep: btn('Keep', () => keep(), 'primary'),
-    discard: btn('Discard', () => discard()),
-    retry: btn('Retry', () => (discard(), start())),
-    close: btn('×', () => hide(), 'icon')
-  }
-  const textSource = sourcePicker('ai')
-  const imageSource = sourcePicker('image')
+  const log = h('div', { class: 'messages' })
+  const input = h('textarea', { placeholder: 'Ask AI to write or change anything in this note…' })
+  const send = h('button', { class: 'primary', textContent: 'Send', title: 'Send (Enter)', onclick: () => run() })
+  const stop = h('button', { textContent: 'Stop', hidden: true, onclick: () => job && ((stopped = true), window.api.ai.cancel(job)) })
+  const close = h('button', { class: 'icon', textContent: '×', title: 'Close (Esc)', onclick: () => hide() })
+  const clear = h('button', { class: 'icon', textContent: 'New chat', title: 'Start a new chat', onclick: () => reset() })
   const grip = h('div', { class: 'grip', title: 'Drag to resize' })
   const label = (text: string, control: HTMLElement) => h('label', {}, h('span', { textContent: text }), control)
   const panel = h('aside', { class: 'ai-panel', hidden: true },
     grip,
-    h('header', {}, h('span', { class: 'spark', textContent: '✨' }), h('b', { textContent: 'AI' }), b.close),
+    h('header', {}, h('span', { class: 'spark', textContent: '✨' }), h('b', { textContent: 'AI' }), clear, close),
+    log,
     input,
-    h('div', { class: 'sources' }, label('Text', textSource), label('Image', imageSource)),
-    h('div', { class: 'actions' }, b.image, b.stop, b.discard, b.retry, b.write, b.keep),
-    status
+    h('footer', {}, label('Text', sourcePicker('ai')), label('Images', sourcePicker('image')), stop, send)
   )
   resizable(panel, grip)
-  b.close.title = 'Close (Esc)'
-  b.image.title = 'Generate an image of what you typed and insert it at the cursor'
 
-  const hasSelection = () => !view.state.selection.main.empty
-  const mode = (): Mode => (hasSelection() ? 'rewrite' : input.value.trim() ? 'write' : 'continue')
-  const labels: Record<Mode, [string, string]> = {
-    rewrite: ['Rewrite', 'Rewrite the selected text as the prompt says (Enter)'],
-    write: ['Write', 'Write what the prompt asks at the cursor (Enter)'],
-    continue: ['Continue', 'Continue the note from the cursor; type a prompt to ask for something specific (Enter)']
+  function message(role: Turn['role'], text: string) {
+    const body = h('div', { textContent: text })
+    const foot = h('div', { class: 'foot' })
+    const el = log.appendChild(h('div', { class: `msg ${role}` }, body, foot))
+    log.scrollTop = log.scrollHeight
+    return { el, body, foot }
   }
-  const updateWrite = () => ([b.write.textContent, b.write.title] = labels[mode()])
-  const shown: Record<State, (keyof typeof b)[]> = {
-    idle: ['image', 'write', 'close'],
-    running: ['stop'],
-    review: ['keep', 'discard', 'retry']
+
+  function reset() {
+    if (job) return
+    history.length = 0
+    undo = null
+    log.replaceChildren(h('p', { class: 'muted', textContent: 'Ask for anything, like "write an opening scene in the rain", "make the second paragraph tenser" or "add a picture of the castle".' }))
   }
-  function setState(s: State, message = '', error = false) {
-    state = s
-    for (const [k, el] of Object.entries(b)) el.hidden = !shown[s].includes(k as keyof typeof b)
-    b.image.hidden ||= hasSelection()
-    updateWrite()
-    input.placeholder = hasSelection()
-      ? 'How should AI rewrite the selection?\n\nLeave empty to just improve the writing.'
-      : 'What should AI write at the cursor?\n\nLeave empty to continue the note, or describe a picture and press Image.'
-    input.disabled = textSource.disabled = imageSource.disabled = s !== 'idle'
-    status.textContent = message
-    status.classList.toggle('error', error)
-    panel.dataset.state = s
+
+  function setBusy(busy: boolean) {
+    send.hidden = busy
+    stop.hidden = !busy
+    panel.dataset.state = busy ? 'running' : 'idle'
   }
 
   function show() {
     if (!getPath()) return
     panel.hidden = false
-    if (state === 'idle') setState('idle')
-    if (state === 'review') b.keep.focus()
-    else input.focus()
+    input.focus()
   }
   function hide() {
-    if (state === 'running') return
-    if (state === 'review') keep()
     panel.hidden = true
     view.focus()
   }
 
-  async function start() {
+  async function run() {
     const path = getPath()
-    if (!path || state === 'running') return
-    if (state === 'review') keep()
-    const sel = view.state.selection.main
-    const m = mode()
     const instruction = input.value.trim()
-    const req = { mode: m, instruction, path, doc: view.state.doc.toString(), from: sel.from, to: sel.to }
+    if (!path || job || !instruction) return
+    input.value = ''
+    message('user', instruction)
+    const reply = message('assistant', '…')
+    reply.el.classList.add('pending')
+    const sel = view.state.selection.main
+    const req = { instruction, history: [...history], path, doc: view.state.doc.toString(), from: sel.from, to: sel.to }
+    history.push({ role: 'user', text: instruction })
 
-    // Generated text goes right after the selection; the note is locked while it streams in.
-    view.dispatch({
-      selection: { anchor: sel.to },
-      effects: [setSpans.of({ orig: { from: sel.from, to: sel.to }, gen: { from: sel.to, to: sel.to } }), lock.reconfigure(EditorState.readOnly.of(true))]
-    })
     const id = (job = crypto.randomUUID())
-    setState('running', 'Writing…')
+    stopped = false
+    setBusy(true)
+    let raw = ''
     listeners.set(id, (text) => {
-      const s = view.state.field(spans, false)
-      if (s) view.dispatch({ changes: { from: s.gen.to, insert: text }, annotations: noHistory, scrollIntoView: true })
+      raw += text
+      const p = parseReply(raw)
+      reply.body.textContent = p.reply || (p.edits.length || raw.includes('<edit>') ? 'Editing the note…' : '…')
+      log.scrollTop = log.scrollHeight
     })
     const error = await window.api.ai.generate(id, req)
     listeners.delete(id)
+    const p = parseReply(raw)
+    const note = (text: string, cls = '') => reply.foot.append(h('span', { class: cls, textContent: text }))
+    const live = () => job === id && !stopped
+    if (live() && !error && p.edits.length) await drawImages(id, p.edits, live, (text) => (reply.body.textContent = text), note)
+    reply.body.textContent = p.reply || (p.edits.length ? 'Done.' : stopped ? 'Stopped.' : error ? '' : 'The AI returned nothing.')
+    if (error) note(error, 'error')
+    if (job !== id) note('Stopped because you opened another note.')
+    reply.el.classList.remove('pending')
+    history.push({ role: 'assistant', text: p.reply || '(edited the note)' })
     if (job !== id) return // settled by switching notes
     job = null
-    view.dispatch({ effects: lock.reconfigure([]) })
-    const s = view.state.field(spans, false)
-    if (!s || s.gen.from === s.gen.to) {
-      discard()
-      return setState('idle', error ?? 'The AI returned no text.', true)
+    setBusy(false)
+    if (!stopped && !error && p.edits.length && getPath() === path) apply(p.edits, reply.foot, note)
+  }
+
+  // Replaces each {{image: …}} with an embed of a generated picture, one at a time.
+  async function drawImages(id: string, edits: Edit[], live: () => boolean, status: (text: string) => void, note: (text: string, cls?: string) => void) {
+    for (const e of edits) {
+      for (const [tag, prompt] of [...e.replace.matchAll(IMAGE)]) {
+        if (!live()) return
+        status('Drawing a picture…')
+        const r = await window.api.images.generate(id, prompt.trim(), 1024, 768)
+        e.replace = e.replace.replace(tag, 'name' in r ? `![[${r.name}]]` : '')
+        if ('error' in r) note(`Picture not drawn: ${r.error}`, 'error')
+      }
     }
-    setState('review', error ?? '', !!error)
-    b.keep.focus()
   }
 
-  async function image() {
-    const prompt = input.value.trim()
-    if (!getPath() || state !== 'idle') return
-    if (!prompt) return input.focus()
-    const id = (job = crypto.randomUUID())
-    setState('running', 'Drawing…')
-    const r = await window.api.images.generate(id, prompt, 1024, 768)
-    if (job !== id) return // settled by switching notes
-    job = null
-    if ('error' in r) return setState('idle', r.error, true)
-    const at = view.state.selection.main.to
-    // The cursor goes to the next line so the embed shows as the image.
-    const text = `![[${r.name}]]\n`
-    view.dispatch({ changes: { from: at, insert: text }, selection: { anchor: at + text.length } })
-    input.value = ''
-    setState('idle')
-    view.focus()
+  function apply(edits: Edit[], foot: HTMLElement, note: (text: string, cls?: string) => void) {
+    const sel = view.state.selection.main
+    const { changes, failed } = placeEdits(view.state.doc.toString(), sel.from, sel.to, edits)
+    if (failed) note(`Couldn't find where to make ${failed === 1 ? 'one change' : `${failed} changes`}.`, 'error')
+    if (!changes.length) return
+    const before = view.state.doc
+    const set = view.state.changes(changes)
+    const marks: ReturnType<typeof addedMark.range>[] = []
+    set.iterChanges((_a, _b, from, to) => to > from && marks.push(addedMark.range(from, to)))
+    view.dispatch({ changes: set, effects: setAdded.of(Decoration.set(marks)), scrollIntoView: true })
+    view.dispatch({ effects: EditorView.scrollIntoView(marks[0]?.from ?? set.mapPos(sel.from), { y: 'center' }) })
+
+    // Undo works while the note is as the AI left it; after that, Ctrl+Z in the note still does.
+    const inverse = set.invert(before)
+    const btn = h('button', { textContent: 'Undo', onclick: () => {
+      if (view.state.doc === undo?.after) view.dispatch({ changes: inverse })
+      btn.remove()
+      undo = null
+    } })
+    undo?.el.remove()
+    undo = { after: view.state.doc, el: btn }
+    foot.append(btn)
   }
 
-  // Re-applies the generated text as a single undoable change replacing the original.
-  function keep() {
-    const s = view.state.field(spans, false)
-    if (s) {
-      const text = view.state.sliceDoc(s.gen.from, s.gen.to)
-      view.dispatch({ changes: { from: s.gen.from, to: s.gen.to }, annotations: noHistory })
-      view.dispatch({ changes: { from: s.orig.from, to: s.orig.to, insert: text }, selection: { anchor: s.orig.from + text.length }, effects: setSpans.of(null) })
-    }
-    input.value = ''
-    setState('idle')
-    view.focus()
-  }
-
-  function discard() {
-    const s = view.state.field(spans, false)
-    if (s) view.dispatch({ changes: { from: s.gen.from, to: s.gen.to }, selection: { anchor: s.orig.from, head: s.orig.to }, effects: setSpans.of(null), annotations: noHistory })
-    setState('idle')
-    view.focus()
-  }
-
-  input.oninput = updateWrite
   input.onkeydown = (k) => {
     if (k.key === 'Enter' && !k.shiftKey) {
       k.preventDefault()
-      start()
+      run()
     }
     if (k.key === 'Escape') hide()
   }
-  panel.onkeydown = (k) => {
-    if (k.key === 'Escape' && state === 'review') discard()
-  }
 
-  setState('idle')
+  reset()
   return {
     panel,
     show,
     toggle: () => (panel.hidden ? show() : hide()),
     extension: [
-      spans,
-      lock.of([]),
+      added,
       keymap.of([{ key: 'Mod-j', run: () => (show(), true) }]),
-      EditorView.updateListener.of((u) => u.selectionSet && state === 'idle' && !panel.hidden && setState('idle', status.textContent ?? '', status.classList.contains('error')))
+      EditorView.updateListener.of((u) => {
+        if (u.docChanged && undo && u.state.doc !== undo.after) {
+          undo.el.remove()
+          undo = null
+        }
+      })
     ],
-    // Called before another note is loaded: stop any generation and keep what was written.
+    // Called before another note is loaded: stop any generation. The chat carries over.
     settle() {
       if (job) window.api.ai.cancel(job)
       job = null
-      setState('idle')
+      undo?.el.remove()
+      undo = null
+      setBusy(false)
     }
   }
 }

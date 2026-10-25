@@ -215,7 +215,45 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
   }
 }
 
-// A book: file tree on the left, tabs of open notes on the right.
+const icons = {
+  folder: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>'
+}
+
+// A view the sidebar can show, picked from the ribbon.
+type Panel = { id: string; title: string; icon: string; el: HTMLElement }
+
+// The ribbon: a narrow column of buttons, one per sidebar panel. A button shows its panel in the
+// sidebar; clicking the shown panel's button again collapses the sidebar. Remembered per book.
+function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]): HTMLElement {
+  const key = `sidebar:${book}`
+  let shown: string | null = panels[0].id
+  try {
+    const saved = localStorage.getItem(key)
+    if (saved === '') shown = null // collapsed
+    else if (panels.some((p) => p.id === saved)) shown = saved
+  } catch {}
+  const buttons = panels.map((p) => {
+    const b = h('button', { class: 'icon', title: p.title, innerHTML: p.icon })
+    b.onclick = () => show(shown === p.id ? null : p.id)
+    return b
+  })
+  const show = (id: string | null) => {
+    shown = id
+    panels.forEach((p, i) => {
+      p.el.hidden = p.id !== id
+      buttons[i].classList.toggle('on', p.id === id)
+    })
+    sidebar.hidden = !id
+    try {
+      localStorage.setItem(key, id ?? '')
+    } catch {}
+  }
+  sidebar.append(...panels.map((p) => p.el))
+  show(shown)
+  return h('aside', { class: 'ribbon' }, ...buttons)
+}
+
+// A book: ribbon and sidebar (file tree) on the left, tabs of open notes on the right.
 export function showBook(root: HTMLElement, book: { id: string; title: string }): void {
   document.title = book.title
   root.className = 'book-view'
@@ -227,18 +265,17 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
   const newFolder = h('button', { textContent: '+ Folder', title: 'New folder (opens as a page of sections)' })
   const main = h('main', { class: 'empty no-tabs' })
 
-  root.replaceChildren(
-    h('nav', {},
-      h('div', { class: 'book-head' },
-        h('button', { class: 'icon', textContent: '←', title: 'Back to library', onclick: () => api.books.close() }),
-        h('b', { textContent: book.title })
-      ),
-      h('div', { class: 'actions' }, newNote, newFolder),
-      tree,
-      h('div', { class: 'nav-foot' }, h('button', { class: 'icon', textContent: '⚙', title: 'Settings', onclick: () => openSettings() }))
-    ),
-    main
+  const nav = h('nav', {},
+    h('div', { class: 'book-head' },
+      h('button', { class: 'icon', textContent: '←', title: 'Back to library', onclick: () => api.books.close() }),
+      h('b', { textContent: book.title })
+    )
   )
+  const ribbon = createRibbon(nav, book.id, [
+    { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) }
+  ])
+  ribbon.append(h('button', { class: 'icon settings', textContent: '⚙', title: 'Settings', onclick: () => openSettings() }))
+  root.replaceChildren(ribbon, nav, main)
   const editor = createEditor(main, pane, crumbs, book.id, {
     openNote: (path, newTab) => explorer.open(path, newTab),
     selected: (path) => explorer.select(path),

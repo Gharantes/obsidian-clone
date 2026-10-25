@@ -83,7 +83,7 @@ const apiOf = (ai: Settings['ai'], a: ApiInfo) =>
 const field = (label: string, ...control: (Node | string)[]) => h('label', { class: 'field' }, h('span', { textContent: label }), ...control)
 
 const AI_SOURCES = { 'claude-code': 'Claude Code', ...Object.fromEntries(APIS.map((a) => [a.id, a.name])) }
-const IMAGE_SOURCES = { pollinations: 'Pollinations', openai: 'OpenAI-compatible' }
+const IMAGE_SOURCES = { pollinations: 'Pollinations', cloudflare: 'Cloudflare', openai: 'OpenAI-compatible' }
 
 // `claude --model` aliases (each is the latest version) and `--effort` levels; '' is Claude Code's default.
 const CLAUDE_MODELS = { '': 'Default model', fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' }
@@ -238,6 +238,13 @@ export async function openSettings(): Promise<void> {
   const pollinations = section('Pollinations', s.image.provider === 'pollinations',
     h('p', { class: 'hint', textContent: 'Free, with no key or setup. Images get a small watermark.' })
   )
+  const cfAccount = h('input', { value: s.image.cloudflare.accountId, placeholder: '32-character ID' })
+  const cfToken = h('input', { type: 'password', value: s.image.cloudflare.apiToken, placeholder: 'Paste your API token' })
+  const cloudflare = section('Cloudflare Workers AI', s.image.provider === 'cloudflare',
+    field('Account ID', cfAccount),
+    field('API token', cfToken),
+    h('p', { class: 'hint', textContent: 'Free for about 95 images a day (FLUX.2 klein), no watermark. Sign up at dash.cloudflare.com, then under AI → Workers AI copy the account ID and create a "Workers AI" API token.' })
+  )
   const imageOpenai = section('OpenAI-compatible image server', s.image.provider === 'openai',
     field('Base URL', imageUrl),
     field('Model', imageModel),
@@ -254,7 +261,8 @@ export async function openSettings(): Promise<void> {
     },
     image: {
       ...s.image,
-      openai: { baseUrl: imageUrl.value.trim(), model: imageModel.value.trim(), apiKey: imageKey.value.trim() }
+      openai: { baseUrl: imageUrl.value.trim(), model: imageModel.value.trim(), apiKey: imageKey.value.trim() },
+      cloudflare: { accountId: cfAccount.value.trim(), apiToken: cfToken.value.trim() }
     }
   })
 
@@ -267,6 +275,7 @@ export async function openSettings(): Promise<void> {
       ...apis.map((x) => x.el),
       h('h3', { textContent: 'Images' }),
       pollinations,
+      cloudflare,
       imageOpenai
     ],
     [

@@ -75,12 +75,19 @@ Settings → Images. Checked **2026-10-20**.
 | Option | Cost | Notes |
 |---|---|---|
 | **Pollinations** (default) | Free, no key, no account | `image.pollinations.ai/prompt/…`. 1 image every 45 s per IP, small "pollinations.ai" watermark. Pollinations calls this endpoint "legacy", so it may go away. Keyed use (`gen.pollinations.ai`) spends "pollen" credits, so it's not in the app. |
+| **Cloudflare Workers AI** | Free up to 10,000 "neurons" a day (resets 00:00 UTC) | Needs a free Cloudflare account: account ID + an API token with *Workers AI* permission. Uses `@cf/black-forest-labs/flux-2-klein-4b` (about 104 neurons per 1024×768 image, so ~95 a day), no watermark, any size 256–1920 px. |
 | **stable-diffusion.cpp** `sd-server` (local) | Free, unlimited, offline | Pick *OpenAI-compatible server*, base URL `http://127.0.0.1:8080/v1`. Needs a model file (e.g. SD 1.5/SDXL/FLUX schnell GGUF) and a decent GPU or patience. |
 | **LocalAI** (local) | Free | Same OpenAI `/v1/images/generations` API. |
 
-Not usable for free: Ollama's image generation is macOS-only (and experimental). Gemini/Imagen image
-models have no reliable free API tier. Cloudflare Workers AI has free FLUX (10K neurons/day), but
-it isn't OpenAI-compatible for images, so it would need its own provider.
+Checked and left out (2026-10-25):
+- **Gemini / Nano Banana** (Gemini 2.5 Flash Image, Gemini 3 Pro Image): Google's pricing page lists the
+  free tier as "Not available". Free only by hand in the Gemini app and AI Studio.
+- **Hugging Face Inference Providers**: free accounts no longer get monthly credits (PRO gets $2).
+- **Together AI**: a $1 trial credit, not a free tier; its free FLUX schnell isn't on serverless anymore.
+- **AI Horde** (`aihorde.net`, free, anonymous key `0000000000`): works, but anonymous requests are capped
+  at about 742×742, a test took over 8 minutes, and all three test images came back as the
+  "CENSORED" placeholder for a harmless prompt.
+- **Ollama** image generation is macOS-only (and experimental).
 
 ## Ideas for later
 
@@ -90,7 +97,7 @@ it isn't OpenAI-compatible for images, so it would need its own provider.
 
 ## Sources
 
-- [Pollinations API docs](https://github.com/pollinations/pollinations/blob/main/APIDOCS.md), [stable-diffusion.cpp server](https://github.com/leejet/stable-diffusion.cpp/tree/master/examples/server), [Ollama image generation](https://github.com/ollama/ollama/blob/main/x/imagegen/README.md)
+- [Pollinations API docs](https://github.com/pollinations/pollinations/blob/main/APIDOCS.md), [stable-diffusion.cpp server](https://github.com/leejet/stable-diffusion.cpp/tree/master/examples/server), [Ollama image generation](https://github.com/ollama/ollama/blob/main/x/imagegen/README.md), [Workers AI pricing](https://developers.cloudflare.com/workers-ai/platform/pricing/), [FLUX.2 klein on Workers AI](https://developers.cloudflare.com/changelog/post/2026-01-15-flux-2-klein-4b-workers-ai/), [Gemini API pricing](https://ai.google.dev/gemini-api/docs/pricing), [HF Inference pricing](https://huggingface.co/docs/inference-providers/pricing)
 
 - [OpenRouter: Free LLM APIs in 2026, 13 options compared](https://openrouter.ai/blog/tutorials/free-llm-apis-compared/) (updated 2026-09-24)
 - [Gemini API OpenAI compatibility docs](https://ai.google.dev/gemini-api/docs/openai)

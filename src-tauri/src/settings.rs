@@ -41,15 +41,24 @@ pub struct OpenAi {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Image {
-    // "pollinations" (free, no key) or "openai".
+    // "pollinations" (free, no key), "cloudflare" or "openai".
     pub provider: String,
     // Any OpenAI-compatible /images/generations endpoint (stable-diffusion.cpp, LocalAI, ...).
     pub openai: OpenAi,
+    // Workers AI, free up to a daily allowance.
+    pub cloudflare: Cloudflare,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Cloudflare {
+    pub account_id: String,
+    pub api_token: String,
 }
 
 impl Default for Image {
     fn default() -> Self {
-        Image { provider: "pollinations".into(), openai: OpenAi { base_url: "http://127.0.0.1:8080/v1".into(), model: String::new(), api_key: String::new() } }
+        Image { provider: "pollinations".into(), openai: OpenAi { base_url: "http://127.0.0.1:8080/v1".into(), model: String::new(), api_key: String::new() }, cloudflare: Cloudflare::default() }
     }
 }
 

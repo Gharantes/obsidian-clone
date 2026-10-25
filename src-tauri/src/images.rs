@@ -229,7 +229,8 @@ async fn fetch(req: reqwest::RequestBuilder, cancel: &CancellationToken) -> Resu
     };
     if !status.is_success() {
         let json: Value = serde_json::from_slice(&body).unwrap_or_default();
-        if let Some(msg) = json["error"]["message"].as_str() {
+        // OpenAI-style {"error": {...}}, or Cloudflare's {"errors": [...]}.
+        if let Some(msg) = json["error"]["message"].as_str().or(json["errors"][0]["message"].as_str()) {
             return Err(msg.to_string());
         }
         return Err(format!("{status}: {}", String::from_utf8_lossy(&body).chars().take(500).collect::<String>()));
@@ -244,6 +245,13 @@ pub fn parse_b64(body: &[u8]) -> Result<Vec<u8>, String> {
         return Err(json["error"]["message"].as_str().map_or(json["error"].to_string(), String::from));
     }
     let b64 = json["data"][0]["b64_json"].as_str().ok_or("The image server returned no b64_json image")?;
+    base64::engine::general_purpose::STANDARD.decode(b64).map_err(err)
+}
+
+// Reads `result.image` (base64) from a Workers AI response.
+pub fn parse_cloudflare(body: &[u8]) -> Result<Vec<u8>, String> {
+    let json: Value = serde_json::from_slice(body).map_err(|_| "Cloudflare did not return JSON")?;
+    let b64 = json["result"]["image"].as_str().ok_or("Cloudflare returned no image")?;
     base64::engine::general_purpose::STANDARD.decode(b64).map_err(err)
 }
 
@@ -264,6 +272,19 @@ pub async fn generate(cfg: &Image, prompt: &str, width: u32, height: u32, cancel
             req = req.bearer_auth(&o.api_key);
         }
         parse_b64(&fetch(req, cancel).await?)?
+    } else if cfg.provider == "cloudflare" {
+        let c = &cfg.cloudflare;
+        if c.account_id.is_empty() || c.api_token.is_empty() {
+            return Err("Add your Cloudflare account ID and API token in Settings → Images".into());
+        }
+        // FLUX.2 [klein] takes form fields; sides must be 256-1920.
+        let side = |n: u32| n.clamp(256, 1920).to_string();
+        let form = reqwest::multipart::Form::new().text("prompt", prompt.to_string()).text("width", side(width)).text("height", side(height));
+        let req = client
+            .post(format!("https://api.cloudflare.com/client/v4/accounts/{}/ai/run/@cf/black-forest-labs/flux-2-klein-4b", c.account_id))
+            .bearer_auth(&c.api_token)
+            .multipart(form);
+        parse_cloudflare(&fetch(req, cancel).await?)?
     } else {
         // Pollinations' anonymous endpoint; a random seed so the same prompt gives a new picture.
         let mut url = reqwest::Url::parse("https://image.pollinations.ai/prompt/").map_err(err)?;
@@ -346,5 +367,8 @@ mod tests {
         assert_eq!(parse_b64(ok.as_bytes()).unwrap(), b"\x89PNG");
         let bad = json!({ "error": { "message": "no model loaded" } }).to_string();
         assert_eq!(parse_b64(bad.as_bytes()).unwrap_err(), "no model loaded");
+
+        let cf = json!({ "result": { "image": "iVBORw==" }, "success": true, "errors": [] }).to_string();
+        assert_eq!(parse_cloudflare(cf.as_bytes()).unwrap(), b"\x89PNG");
     }
 }

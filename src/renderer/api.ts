@@ -25,9 +25,11 @@ export type Settings = {
     apis: Record<string, ApiConfig>
   }
   image: {
-    // Pollinations is free with no key; "openai" is any /images/generations server (stable-diffusion.cpp, LocalAI, ...).
-    provider: 'pollinations' | 'openai'
+    // Pollinations is free with no key; Cloudflare Workers AI is free up to a daily allowance;
+    // "openai" is any /images/generations server (stable-diffusion.cpp, LocalAI, ...).
+    provider: 'pollinations' | 'cloudflare' | 'openai'
     openai: ApiConfig
+    cloudflare: { accountId: string; apiToken: string }
   }
 }
 

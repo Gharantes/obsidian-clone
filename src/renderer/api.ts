@@ -1,6 +1,6 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { buildPrompt, outline, parentNotes, SYSTEM, type AiRequest } from './prompt.ts'
+import { buildPrompt, outline, parentNotes, SYSTEM, type AiRequest, type Turn } from './prompt.ts'
 
 // Folders carry `note` when they have a folder note ("X/X.md"); that note is left out of `children`.
 export type Entry = { path: string; name: string; folder: boolean; note?: string; children?: Entry[] }
@@ -60,6 +60,14 @@ const files = {
   remove: (path: string): Promise<void> => invoke('fs_remove', { path })
 }
 
+// The book's AI chats, most recent first.
+const chats = {
+  list: (): Promise<{ id: string; title: string; ts: number }[]> => invoke('chat_list'),
+  get: (id: string): Promise<Turn[] | null> => invoke('chat_get', { id }),
+  save: (id: string, title: string, turns: Turn[]): Promise<void> => invoke('chat_save', { id, title, turns }),
+  remove: (id: string): Promise<void> => invoke('chat_remove', { id })
+}
+
 // Builds the prompt from the book (outline, parent folder notes) and streams the reply as chunks.
 async function generate(id: string, req: AiRequest): Promise<string | null> {
   try {
@@ -94,6 +102,7 @@ export const api = {
   },
   ai: {
     generate,
+    chats,
     cancel: (id: string): Promise<void> => invoke('ai_cancel', { id }),
     onChunk: (cb: (id: string, text: string) => void) => on('ai-chunk', ([id, text]) => cb(id, text)),
     detectClaude: (): Promise<string | null> => invoke('ai_detect_claude'),

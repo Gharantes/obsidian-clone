@@ -100,6 +100,17 @@
       .ai-panel header b { flex: 1; }
       .ai-panel header button.icon { font-size: 13px; }
       .ai-panel header button.icon:last-child { font-size: 16px; }
+      .ai-panel header button.on { background: var(--active); color: var(--fg); }
+      .ai-panel .chats { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 2px; min-height: 80px; }
+      .ai-panel .chats > .muted { margin: 0; }
+      .ai-panel .chat { display: flex; align-items: center; border-radius: 6px; }
+      .ai-panel .chat:hover { background: var(--hover); }
+      .ai-panel .chat.active { background: var(--active); }
+      .ai-panel .chat > button:first-child { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; text-align: left; border: 0; background: none; padding: 6px 8px; }
+      .ai-panel .chat span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .ai-panel .chat small { color: var(--muted); font-size: 11px; }
+      .ai-panel .chat .icon { visibility: hidden; }
+      .ai-panel .chat:hover .icon { visibility: visible; }
       .ai-panel .messages { flex: 1; overflow: auto; display: flex; flex-direction: column; gap: 12px; min-height: 80px; font-size: 15px; line-height: 1.55; }
       .ai-panel .messages > .muted { font-size: 13px; margin: 0; }
       .ai-panel .msg { white-space: pre-wrap; overflow-wrap: anywhere; }

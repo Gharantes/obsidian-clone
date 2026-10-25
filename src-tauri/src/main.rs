@@ -3,6 +3,7 @@
 
 mod ai;
 mod books;
+mod chats;
 mod files;
 mod images;
 mod settings;
@@ -253,6 +254,26 @@ fn fs_create(state: AppState, window: WebviewWindow, folder: bool, parent: Optio
     in_book(&state, &window, |db, b| files::create_entry(db, b, parent.as_deref().unwrap_or(""), folder))?
 }
 
+#[tauri::command]
+fn chat_list(state: AppState, window: WebviewWindow) -> Result<Vec<chats::Chat>, String> {
+    in_book(&state, &window, chats::list)?
+}
+
+#[tauri::command]
+fn chat_get(state: AppState, window: WebviewWindow, id: String) -> Result<Option<Value>, String> {
+    in_book(&state, &window, |db, b| chats::get(db, b, &id))?
+}
+
+#[tauri::command]
+fn chat_save(state: AppState, window: WebviewWindow, id: String, title: String, turns: Value) -> Result<(), String> {
+    in_book(&state, &window, |db, b| chats::save(db, b, &id, &title, &turns))?
+}
+
+#[tauri::command]
+fn chat_remove(state: AppState, window: WebviewWindow, id: String) -> Result<(), String> {
+    in_book(&state, &window, |db, b| chats::remove(db, b, &id))?
+}
+
 // --- Settings ---
 
 const MASK: &str = "••••••••";
@@ -370,6 +391,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_cover, book_remove,
             fs_list, fs_read, fs_write, fs_rename, fs_nest, fs_move, fs_remove, fs_create,
+            chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,
             ai_generate, ai_cancel, ai_detect_claude, ai_test, image_generate
         ])

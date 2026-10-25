@@ -9,7 +9,8 @@ A clone of [Obsidian](https://obsidian.md), the Markdown knowledge base app, sha
   under it; drag items to move them. Right-click a book → *Export as .zip* to get it as folders of `.md` files.
 - **AI writing**: in a note press **Ctrl+J** (or the ✨ AI button) to open the AI chat sidebar. Ask for anything —
   write something new, change or cut what's there, answer a question — and it edits the note itself, highlighting
-  what it wrote, with **Undo** on its message. The AI sees the book outline, parent folder notes and the current note.
+  what it wrote, with **Undo** on its message. Chats are saved with the book; **History** reopens one to carry on
+  where you left off. The AI sees the book outline, parent folder notes and the current note.
 - **AI images**: ask the AI chat for a picture and it adds one to the note as `![[name.jpg]]`.
   Right-click a book → *Generate cover image…* for an AI cover. Free by default (Pollinations, no key); see
   [FREE_AI_OPTIONS.md](FREE_AI_OPTIONS.md#images-covers-and-pictures-in-notes). Exported zips keep images in `attachments/`.

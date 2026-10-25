@@ -2,7 +2,7 @@ import { StateEffect, StateField, type Text } from '@codemirror/state'
 import { Decoration, EditorView, keymap, type DecorationSet } from '@codemirror/view'
 import { parseReply, placeEdits, type Edit, type Turn } from './prompt.ts'
 import { sourcePicker } from './settings.ts'
-import { h } from './ui.ts'
+import { ago, h } from './ui.ts'
 
 // Text the AI just wrote stays highlighted until the next edit.
 const setAdded = StateEffect.define<DecorationSet>()
@@ -22,9 +22,12 @@ window.api.ai.onChunk((id, text) => listeners.get(id)?.(text))
 const IMAGE = /\{\{image:\s*([^}]*)\}\}/g
 
 // AI chat sidebar for the editor (Ctrl/Cmd+J). Ask for anything; the AI answers and edits the note
-// itself (one undo step, with an Undo button on its message). Drag the left edge to resize.
+// itself (one undo step, with an Undo button on its message). Chats are saved with the book and
+// can be reopened from History. Drag the left edge to resize.
 export function createAi(view: EditorView, getPath: () => string | null) {
+  const chats = window.api.ai.chats
   const history: Turn[] = []
+  let chatId: string | null = null
   let job: string | null = null
   let stopped = false
   let undo: { after: Text; el: HTMLElement } | null = null
@@ -35,12 +38,15 @@ export function createAi(view: EditorView, getPath: () => string | null) {
   const stop = h('button', { textContent: 'Stop', hidden: true, onclick: () => job && ((stopped = true), window.api.ai.cancel(job)) })
   const close = h('button', { class: 'icon', textContent: '×', title: 'Close (Esc)', onclick: () => hide() })
   const clear = h('button', { class: 'icon', textContent: 'New chat', title: 'Start a new chat', onclick: () => reset() })
+  const past = h('button', { class: 'icon', textContent: 'History', title: 'Reopen a previous chat', onclick: () => (list.hidden ? showList() : hideList()) })
+  const list = h('div', { class: 'chats', hidden: true })
   const grip = h('div', { class: 'grip', title: 'Drag to resize' })
   const label = (text: string, control: HTMLElement) => h('label', {}, h('span', { textContent: text }), control)
   const panel = h('aside', { class: 'ai-panel', hidden: true },
     grip,
-    h('header', {}, h('span', { class: 'spark', textContent: '✨' }), h('b', { textContent: 'AI' }), clear, close),
+    h('header', {}, h('span', { class: 'spark', textContent: '✨' }), h('b', { textContent: 'AI' }), past, clear, close),
     log,
+    list,
     input,
     h('footer', {}, label('Text', sourcePicker('ai')), label('Images', sourcePicker('image')), stop, send)
   )
@@ -54,11 +60,47 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     return { el, body, foot }
   }
 
-  function reset() {
-    if (job) return
-    history.length = 0
+  // Shows a chat: a new empty one, or saved messages.
+  function load(id: string | null, turns: Turn[]) {
+    chatId = id
+    history.splice(0, history.length, ...turns)
     undo = null
-    log.replaceChildren(h('p', { class: 'muted', textContent: 'Ask for anything, like "write an opening scene in the rain", "make the second paragraph tenser" or "add a picture of the castle".' }))
+    log.replaceChildren()
+    if (!turns.length) log.append(h('p', { class: 'muted', textContent: 'Ask for anything, like "write an opening scene in the rain", "make the second paragraph tenser" or "add a picture of the castle".' }))
+    for (const t of turns) message(t.role, t.text)
+    hideList()
+  }
+  function reset() {
+    if (!job) load(null, [])
+  }
+
+  async function showList() {
+    const all = await chats.list()
+    list.replaceChildren(...(all.length ? [] : [h('p', { class: 'muted', textContent: 'No saved chats yet.' })]))
+    for (const c of all) {
+      const row = h('div', { class: `chat${c.id === chatId ? ' active' : ''}` },
+        h('button', { onclick: async () => !job && load(c.id, (await chats.get(c.id)) ?? []) }, h('span', { textContent: c.title }), h('small', { textContent: ago(c.ts) })),
+        h('button', { class: 'icon', textContent: '×', title: 'Delete chat', onclick: async () => {
+          await chats.remove(c.id)
+          if (c.id === chatId) chatId = null // keeps the messages on screen; the next one saves them as a new chat
+          row.remove()
+        } })
+      )
+      list.append(row)
+    }
+    log.hidden = true
+    list.hidden = false
+    past.classList.add('on')
+  }
+  function hideList() {
+    list.hidden = true
+    log.hidden = false
+    past.classList.remove('on')
+  }
+
+  const save = () => {
+    chatId ??= crypto.randomUUID()
+    return chats.save(chatId, history[0].text.slice(0, 80), history)
   }
 
   function setBusy(busy: boolean) {
@@ -82,6 +124,8 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     const instruction = input.value.trim()
     if (!path || job || !instruction) return
     input.value = ''
+    hideList()
+    if (!history.length) log.replaceChildren()
     message('user', instruction)
     const reply = message('assistant', '…')
     reply.el.classList.add('pending')
@@ -110,6 +154,7 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     if (job !== id) note('Stopped because you opened another note.')
     reply.el.classList.remove('pending')
     history.push({ role: 'assistant', text: p.reply || '(edited the note)' })
+    save()
     if (job !== id) return // settled by switching notes
     job = null
     setBusy(false)

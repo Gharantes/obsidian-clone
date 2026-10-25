@@ -41,6 +41,11 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
         -- Images embedded in notes as ![[name]], and book covers.
         CREATE TABLE IF NOT EXISTS images (
             book TEXT NOT NULL REFERENCES books ON DELETE CASCADE, name TEXT NOT NULL, data BLOB NOT NULL, PRIMARY KEY (book, name)
+        );
+        -- AI chats; `turns` is the JSON list of messages.
+        CREATE TABLE IF NOT EXISTS chats (
+            book TEXT NOT NULL REFERENCES books ON DELETE CASCADE, id TEXT NOT NULL, title TEXT NOT NULL, ts INTEGER NOT NULL,
+            turns TEXT NOT NULL, PRIMARY KEY (book, id)
         );",
     )?;
     // Databases made before covers lack the column.

@@ -40,6 +40,7 @@ export function createAssets(o: AssetsOpts) {
       const empty = !folders.some((f) => parentOf(f) === path) && !images.some(([, f]) => f === path)
       const row = h('div', { class: `row folder${open ? ' open' : ''}`, title: path, draggable: true },
         h('span', { class: `arrow${empty ? ' none' : ''}` }),
+        h('span', { class: 'folder-icon' }),
         h('span', { textContent: baseName(path) })
       )
       row.onclick = () => toggle(path)

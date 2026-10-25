@@ -345,6 +345,28 @@ fn image_list(state: AppState, window: WebviewWindow) -> Result<Vec<String>, Str
 }
 
 #[tauri::command]
+fn image_rename(state: AppState, window: WebviewWindow, name: String, new_name: String) -> Result<Value, String> {
+    in_book(&state, &window, |db, b| match images::rename(db, b, &name, &new_name) {
+        Ok(name) => json!({ "name": name }),
+        Err(e) => json!({ "error": e }),
+    })
+}
+
+// Saves a copy of an image where the user picks; returns an error message, if any.
+#[tauri::command]
+async fn image_save(app: AppHandle, window: WebviewWindow, name: String) -> Option<String> {
+    let data = in_book(&app.state::<Mutex<App>>(), &window, |db, b| images::get(db, b, &name));
+    let data = match data {
+        Ok(Ok(Some(d))) => d,
+        Ok(Ok(None)) => return Some(format!("\"{name}\" no longer exists")),
+        Ok(Err(e)) | Err(e) => return Some(e),
+    };
+    let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
+    let file = window.dialog().file().set_parent(&window).set_file_name(&name).add_filter("Image", &[ext]).blocking_save_file()?.into_path().ok()?;
+    std::fs::write(file, data).err().map(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn image_generate(app: AppHandle, window: WebviewWindow, id: String, prompt: String, width: u32, height: u32, book: Option<String>) -> Value {
     let cancel = CancellationToken::new();
     let found = {
@@ -419,7 +441,7 @@ fn main() {
             fs_list, fs_read, fs_write, fs_rename, fs_nest, fs_move, fs_remove, fs_create, fs_create_note,
             chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,
-            ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_list, image_generate
+            ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_list, image_rename, image_save, image_generate
         ])
         // Serves book images at img://localhost/<book id>%2F<name> (see convertFileSrc in the renderer).
         .register_uri_scheme_protocol("img", |ctx, req| {

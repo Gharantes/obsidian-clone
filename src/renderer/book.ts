@@ -9,7 +9,7 @@ import { createFolderPage, type FolderPage } from './folderPage.ts'
 import { livePreview } from './livePreview.ts'
 import { isFolderNote } from './sections.ts'
 import { openSettings } from './settings.ts'
-import { createTabBar, imageName, loadTabs, nextTab, saveTabs } from './tabs.ts'
+import { createTabBar, imageName, imageTab, loadTabs, nextTab, saveTabs } from './tabs.ts'
 import { h } from './ui.ts'
 
 const { api } = window
@@ -25,6 +25,8 @@ type EditorOpts = {
   selected(path: string | null): void
   // Rereads the file tree after notes changed outside the explorer.
   refresh(): void
+  // Right-click on an image tab's image.
+  imageMenu(ev: MouseEvent, name: string): void
 }
 
 // The open tabs and the active one's note: one editor, or for a folder note the folder's page of
@@ -124,7 +126,9 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     const n = ++loads
     const name = imageName(path)
     if (name) {
-      image = h('div', { class: 'image-view' }, h('img', { src: api.images.url(book, name), alt: name }))
+      const img = h('img', { src: api.images.url(book, name), alt: name })
+      img.oncontextmenu = (ev) => o.imageMenu(ev, name)
+      image = h('div', { class: 'image-view' }, img)
       pane.append(image)
       view.dom.hidden = true
       return
@@ -211,6 +215,13 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       showCrumbs()
     },
     deleted,
+    // Saves pending edits now, before notes are changed behind the editor's back.
+    flush: () => timer && save(),
+    // Rereads the active tab's note (or image) after it changed behind the editor's back.
+    reload() {
+      leave()
+      load()
+    },
     listed(t: Entry[]) {
       tree = t
       page?.setTree(t)
@@ -285,7 +296,14 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
       h('b', { textContent: book.title })
     )
   )
-  const assets = createAssets((path, newTab) => editor.open(path, newTab))
+  const assets = createAssets({
+    open: (path, newTab) => editor.open(path, newTab),
+    flush: () => editor.flush(),
+    renamed(from, to) {
+      editor.renamed(imageTab(from), imageTab(to))
+      editor.reload() // its embeds may have changed
+    }
+  })
   const ribbon = createRibbon(nav, book.id, [
     { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) },
     { id: 'assets', title: 'Assets', icon: icons.image, el: assets.el, shown: assets.load }
@@ -298,7 +316,8 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
       explorer.select(path)
       assets.select(path)
     },
-    refresh: () => explorer.refresh()
+    refresh: () => explorer.refresh(),
+    imageMenu: (ev, name) => assets.menu(ev, name)
   })
   main.append(
     editor.bar,

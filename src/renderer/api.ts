@@ -110,6 +110,10 @@ const images = {
   generate: (id: string, prompt: string, width: number, height: number, book?: string): Promise<{ name: string } | { error: string }> =>
     invoke('image_generate', { id, prompt, width, height, book }),
   list: (): Promise<string[]> => invoke('image_list'),
+  // Keeps the extension when the new name has none; notes embedding the image are updated.
+  rename: (name: string, newName: string): Promise<{ name: string } | { error: string }> => invoke('image_rename', { name, newName }),
+  // Asks where to save a copy; resolves to an error message, or null.
+  save: (name: string): Promise<string | null> => invoke('image_save', { name }),
   url: (book: string, name: string) => convertFileSrc(`${book}/${name}`, 'img')
 }
 

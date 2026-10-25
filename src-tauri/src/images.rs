@@ -1,4 +1,4 @@
-use crate::files::err;
+use crate::files::{bad_name, err};
 use crate::settings::Image;
 use base64::Engine;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -36,6 +36,42 @@ pub fn names(db: &Connection, book: &str) -> Result<Vec<String>, String> {
     let mut stmt = db.prepare("SELECT name FROM images WHERE book = ?1 ORDER BY name COLLATE NOCASE").map_err(err)?;
     let rows = stmt.query_map([book], |r| r.get(0)).map_err(err)?.collect::<Result<_, _>>().map_err(err);
     rows
+}
+
+// Renames an image, keeping its extension when the new name has none, and points the notes that
+// embed it (![[name]] or ![[name|alt]]) and the book cover at the new name. Returns the new name.
+pub fn rename(db: &Connection, book: &str, name: &str, new_name: &str) -> Result<String, String> {
+    let mut new_name = new_name.trim().to_string();
+    if let Some(bad) = bad_name(&new_name) {
+        return Err(bad);
+    }
+    if !is_image_name(&new_name) {
+        if let Some((_, ext)) = name.rsplit_once('.') {
+            new_name = format!("{new_name}.{ext}");
+        }
+    }
+    if new_name == name {
+        return Ok(new_name);
+    }
+    if get(db, book, &new_name)?.is_some() {
+        return Err(format!("\"{new_name}\" already exists"));
+    }
+    let tx = db.unchecked_transaction().map_err(err)?;
+    if tx.execute("UPDATE images SET name = ?3 WHERE book = ?1 AND name = ?2", params![book, name, new_name]).map_err(err)? == 0 {
+        return Err(format!("\"{name}\" no longer exists"));
+    }
+    tx.execute("UPDATE books SET cover = ?2 WHERE id = ?1 AND cover = ?3", params![book, new_name, name]).map_err(err)?;
+    let notes: Vec<(String, String)> = {
+        let mut stmt = tx.prepare("SELECT path, text FROM entries WHERE book = ?1 AND text LIKE '%' || ?2 || '%'").map_err(err)?;
+        let rows = stmt.query_map(params![book, format!("![[{name}")], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?.collect::<Result<_, _>>().map_err(err)?;
+        rows
+    };
+    for (path, text) in notes {
+        let text = text.replace(&format!("![[{name}]]"), &format!("![[{new_name}]]")).replace(&format!("![[{name}|"), &format!("![[{new_name}|"));
+        tx.execute("UPDATE entries SET text = ?3 WHERE book = ?1 AND path = ?2", params![book, path, text]).map_err(err)?;
+    }
+    tx.commit().map_err(err)?;
+    Ok(new_name)
 }
 
 pub fn all(db: &Connection, book: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
@@ -116,6 +152,22 @@ pub async fn generate(cfg: &Image, prompt: &str, width: u32, height: u32, cancel
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn rename_updates_embeds_and_cover() {
+        let db = &crate::files::tests::test_db();
+        add(db, "b", "Map.png", b"\x89PNG").unwrap();
+        add(db, "b", "Other.png", b"\x89PNG").unwrap();
+        crate::books::set_cover(db, "b", Some("Map.png")).unwrap();
+        crate::files::write(db, "b", "Note.md", "![[Map.png]] and ![[Map.png|alt]], not ![[Map.png.png]]").unwrap();
+
+        assert_eq!(rename(db, "b", "Map.png", "World").unwrap(), "World.png", "keeps the extension");
+        assert_eq!(names(db, "b").unwrap(), ["Other.png", "World.png"]);
+        assert_eq!(crate::files::read(db, "b", "Note.md").unwrap(), "![[World.png]] and ![[World.png|alt]], not ![[Map.png.png]]");
+        assert_eq!(crate::books::list(db).unwrap()[0].cover.as_deref(), Some("World.png"));
+        assert!(rename(db, "b", "World.png", "Other.png").unwrap_err().contains("already exists"));
+        assert!(rename(db, "b", "World.png", "a/b").is_err());
+    }
 
     #[test]
     fn detects_images_and_reads_b64() {

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildPrompt, outline, parentNotes, parseReply, placeEdits } from './prompt.ts'
+import { buildPrompt, endSeparator, mentioned, noteName, notePaths, outline, parentNotes, parseReply, placeEdits } from './prompt.ts'
 
 test('parent folder notes', () => {
   assert.deepEqual(parentNotes('A/B/C.md'), ['A/A.md', 'A/B/B.md'])
@@ -14,11 +14,26 @@ test('book outline', () => {
     { path: 'cover.png', name: 'cover.png', folder: false },
     { path: 'Ideas.md', name: 'Ideas.md', folder: false }
   ]
-  assert.equal(outline(tree, 'Part 1/Part 1.md'), '- Part 1 (current note)\n  - Scene\n- Ideas')
+  assert.equal(outline(tree, 'Part 1/Part 1.md'), '- Part 1/ (folder page: Part 1/Part 1.md) (open)\n  - Part 1/Scene.md\n- Ideas.md')
+  assert.equal(outline(tree, null), '- Part 1/ (folder page: Part 1/Part 1.md)\n  - Part 1/Scene.md\n- Ideas.md')
+})
+
+test('notes the chat points at', () => {
+  const tree = [
+    { path: 'Part 1', name: 'Part 1', folder: true, note: 'Part 1/Part 1.md', children: [{ path: 'Part 1/Mira.md', name: 'Mira.md', folder: false }] },
+    { path: 'Ideas.md', name: 'Ideas.md', folder: false },
+    { path: 'Al.md', name: 'Al.md', folder: false }
+  ]
+  assert.deepEqual(notePaths(tree), ['Part 1/Part 1.md', 'Part 1/Mira.md', 'Ideas.md', 'Al.md'])
+  assert.equal(noteName('Part 1/Part 1.md'), 'Part 1', 'a folder page goes by its folder')
+  assert.deepEqual(mentioned('fix [[Part 1/Mira]] and [[ideas.md]]', tree), ['Part 1/Mira.md', 'Ideas.md'], 'links by path')
+  assert.deepEqual(mentioned('see [[Part 1]]', tree), ['Part 1/Part 1.md'], 'a folder link is its page')
+  assert.deepEqual(mentioned('make mira braver', tree), ['Part 1/Mira.md'], 'titles written out')
+  assert.deepEqual(mentioned('a Mirage and Al', tree), [], 'whole words, three letters or more')
 })
 
 test('prompt marks the cursor or the selection and carries the chat', () => {
-  const base = { instruction: 'make it rain', history: [], path: 'Part 1/Scene.md', doc: 'Hello world.', book: 'Novel', outline: '- Scene', parents: [{ title: 'Part 1', text: 'Summary' }] }
+  const base = { instruction: 'make it rain', history: [], path: 'Part 1/Scene.md', doc: 'Hello world.', book: 'Novel', outline: '- Scene', parents: [{ title: 'Part 1', text: 'Summary' }], notes: [] }
 
   const atCursor = buildPrompt({ ...base, from: 6, to: 6 })
   assert.match(atCursor, /Hello <cursor\/>world\./)
@@ -30,6 +45,12 @@ test('prompt marks the cursor or the selection and carries the chat', () => {
   const selected = buildPrompt({ ...base, from: 6, to: 11, history: [{ role: 'user', text: 'hi' }, { role: 'assistant', text: 'Hello!' }] })
   assert.match(selected, /Hello <selection>world<\/selection>\./)
   assert.match(selected, /Chat so far:\nUser: hi\nYou: Hello!/)
+
+  const none = buildPrompt({ ...base, path: null, doc: '', from: 0, to: 0, notes: [{ path: 'Mira.md', text: 'Brave.' }], history: [{ role: 'assistant', text: 'Made it.', notes: ['Mira.md'] }] })
+  assert.match(none, /No note is open\./)
+  assert.match(none, /Note "Mira\.md":\n"""\nBrave\./)
+  assert.match(none, /You: Made it\. \(changed Mira\.md\)/)
+  assert.doesNotMatch(none, /<cursor\/>/)
 })
 
 test('reply parsing, while streaming and when done', () => {
@@ -37,6 +58,20 @@ test('reply parsing, while streaming and when done', () => {
   assert.deepEqual(parseReply('Just an answer.'), { reply: 'Just an answer.', edits: [] }, 'untagged text is the reply')
   const done = parseReply('<reply>Done.</reply>\n<edit><find>world</find><replace>\nrainy world\n</replace></edit>\n<edit><find>')
   assert.deepEqual(done, { reply: 'Done.', edits: [{ find: 'world', replace: 'rainy world' }] }, 'only complete edits; tag newlines dropped')
+
+  const notes = parseReply('<reply>Ok.</reply><edit note="/Part 1/Mira"><find>a</find><replace>b</replace></edit><create note="Part 2/Arrival.md">\nNew.\n</create><create>no path</create>')
+  assert.deepEqual(notes.edits, [
+    { find: 'a', replace: 'b', note: 'Part 1/Mira.md' },
+    { find: '', replace: 'New.', note: 'Part 2/Arrival.md', create: true }
+  ], 'other notes and new ones, by path')
+  assert.equal(parseReply('<create note="x.md">Hal').reply, '', 'a change still streaming is not the reply')
+})
+
+test('adding to the end of a note', () => {
+  assert.equal(endSeparator('', false), '')
+  assert.equal(endSeparator('Text.', false), '\n\n')
+  assert.equal(endSeparator('Text.\n', false), '\n')
+  assert.equal(endSeparator('<!-- section: text -->\nIntro\n<!-- section: index -->', true), '\n<!-- section: text -->\n', 'not into the index')
 })
 
 test('placing edits', () => {

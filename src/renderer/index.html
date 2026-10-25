@@ -81,7 +81,7 @@
       .crumbs .sep { margin: 0 6px; opacity: .6; }
       .ai-toggle { padding: 3px 10px; }
       .editor { flex: 1; overflow: hidden; }
-      main.empty .editor, main.empty .note-head, main.empty ~ .ai-panel, main:not(.empty) .placeholder { display: none !important; }
+      main.empty .editor, main:not(.empty) .placeholder { display: none !important; }
       .placeholder { text-align: center; margin-top: 30vh; padding: 0 24px; color: var(--muted); }
       .placeholder p:first-child { font-size: 16px; color: var(--fg); }
       .placeholder .links { display: flex; justify-content: center; gap: 8px; margin-top: 16px; }
@@ -155,6 +155,10 @@
       .ai-panel .msg .foot:not(:empty) { margin-top: 6px; }
       .ai-panel .msg .foot .error { margin: 0; }
       .ai-panel .msg .foot button { padding: 2px 10px; }
+      .ai-panel .msg .foot .note-link { border-color: transparent; background: var(--bg-3); color: var(--accent); max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .ai-panel .suggest { flex: none; display: flex; flex-direction: column; gap: 1px; margin-bottom: -6px; max-height: 220px; overflow: auto; border: 1px solid var(--line); border-radius: 8px; padding: 4px; background: var(--bg); }
+      .ai-panel .suggest button { border: 0; background: none; text-align: left; padding: 4px 8px; border-radius: 5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .ai-panel .suggest button.on, .ai-panel .suggest button:hover { background: var(--active); }
       .ai-panel textarea { flex: none; height: 120px; min-height: 60px; resize: vertical; font-size: 15px; line-height: 1.55; padding: 10px 12px; }
       .ai-panel footer { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
       .ai-panel footer label { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }

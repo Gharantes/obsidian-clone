@@ -249,6 +249,12 @@ fn fs_remove(state: AppState, window: WebviewWindow, path: String) -> Result<(),
     in_book(&state, &window, |db, b| files::remove(db, b, &path))?
 }
 
+// Creates a note with its text and any missing folders; resolves to the topmost new path or an error.
+#[tauri::command]
+fn fs_create_note(state: AppState, window: WebviewWindow, path: String, text: String) -> Result<Value, String> {
+    in_book(&state, &window, |db, b| moved(files::create_note(db, b, &path, &text)))
+}
+
 #[tauri::command]
 fn fs_create(state: AppState, window: WebviewWindow, folder: bool, parent: Option<String>) -> Result<String, String> {
     in_book(&state, &window, |db, b| files::create_entry(db, b, parent.as_deref().unwrap_or(""), folder))?
@@ -390,7 +396,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_cover, book_remove,
-            fs_list, fs_read, fs_write, fs_rename, fs_nest, fs_move, fs_remove, fs_create,
+            fs_list, fs_read, fs_write, fs_rename, fs_nest, fs_move, fs_remove, fs_create, fs_create_note,
             chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,
             ai_generate, ai_cancel, ai_detect_claude, ai_test, image_generate

@@ -22,6 +22,8 @@ type EditorOpts = {
   openNote(path: string, newTab: boolean): void
   // Called with the active tab's note whenever it changes.
   selected(path: string | null): void
+  // Rereads the file tree after notes changed outside the explorer.
+  refresh(): void
 }
 
 // The open tabs and the active one's note: one editor, or for a folder note the folder's page of
@@ -48,7 +50,14 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     timer = setTimeout(save, 500)
   }
   const view = new EditorView({ parent: pane })
-  const ai = createAi(() => (page ? (focused?.dom.isConnected ? focused : page.firstView()) : current ? view : null), () => current)
+  const ai = createAi({
+    view: () => (page ? (focused?.dom.isConnected ? focused : page.firstView()) : current ? view : null),
+    path: () => current,
+    tree: () => tree,
+    open: (path) => o.openNote(path, false),
+    refresh: () => o.refresh(),
+    deleted: (path) => deleted(path)
+  })
   const extensions = [
     basicSetup,
     markdown({ base: markdownLanguage }),
@@ -161,6 +170,16 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     else activate(next)
   }
 
+  // Closes the tabs showing the deleted note or folder, without saving them.
+  function deleted(path: string) {
+    const gone = (t: Tab) => !!t.path && movePath(t.path, path, '') !== t.path
+    if (active && gone(active)) {
+      clearTimeout(timer)
+      timer = undefined
+    }
+    closeWhere(gone)
+  }
+
   return {
     open,
     ai,
@@ -179,15 +198,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       redraw()
       showCrumbs()
     },
-    // Closes the tabs showing the deleted note or folder, without saving them.
-    deleted(path: string) {
-      const gone = (t: Tab) => !!t.path && movePath(t.path, path, '') !== t.path
-      if (active && gone(active)) {
-        clearTimeout(timer)
-        timer = undefined
-      }
-      closeWhere(gone)
-    },
+    deleted,
     listed(t: Entry[]) {
       tree = t
       page?.setTree(t)
@@ -230,7 +241,8 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
   )
   const editor = createEditor(main, pane, crumbs, book.id, {
     openNote: (path, newTab) => explorer.open(path, newTab),
-    selected: (path) => explorer.select(path)
+    selected: (path) => explorer.select(path),
+    refresh: () => explorer.refresh()
   })
   main.append(
     editor.bar,
@@ -241,6 +253,7 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
       h('p', { class: 'muted', textContent: 'Pick a note on the left. Ctrl+click or middle-click one to open it in a new tab.' }),
       h('div', { class: 'links' },
         h('button', { textContent: 'Create new note', onclick: () => explorer.create(false) }),
+        h('button', { textContent: '✨ Ask AI', title: 'Create or change notes with AI (Ctrl+J)', onclick: () => editor.ai.show() }),
         h('button', { class: 'close-tab', textContent: 'Close tab', onclick: () => editor.closeTab() })
       )
     )
@@ -251,11 +264,13 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
   newNote.onclick = () => explorer.create(false)
   newFolder.onclick = () => explorer.create(true)
 
-  // Ctrl+T new tab, Ctrl+W close it, Ctrl+Tab / Ctrl+PageDown next tab (with Shift / PageUp: previous).
+  // Ctrl+J the AI sidebar, Ctrl+T new tab, Ctrl+W close it, Ctrl+Tab / Ctrl+PageDown next tab (with
+  // Shift / PageUp: previous).
   document.addEventListener('keydown', (k) => {
     const mod = (k.ctrlKey || k.metaKey) && !k.altKey
     const key = k.key.toLowerCase()
-    if (mod && !k.shiftKey && key === 't') editor.newTab()
+    if (mod && !k.shiftKey && key === 'j') editor.ai.toggle()
+    else if (mod && !k.shiftKey && key === 't') editor.newTab()
     else if (mod && !k.shiftKey && key === 'w') editor.closeTab()
     else if (k.ctrlKey && key === 'tab') editor.cycle(k.shiftKey ? -1 : 1)
     else if (k.ctrlKey && (key === 'pagedown' || key === 'pageup')) editor.cycle(key === 'pagedown' ? 1 : -1)

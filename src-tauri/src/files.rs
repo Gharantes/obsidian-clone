@@ -189,6 +189,41 @@ pub fn create_entry(db: &Connection, book: &str, parent: &str, folder: bool) -> 
     Ok(path)
 }
 
+// Creates note `rel` with `text`, adding any missing folders in its path (each with a folder note).
+// Returns the topmost entry created, so removing it undoes this.
+pub fn create_note(db: &Connection, book: &str, rel: &str, text: &str) -> Result<String, String> {
+    check(rel)?;
+    if !rel.ends_with(".md") {
+        return Err(format!("Not a note: {rel}"));
+    }
+    if let Some(bad) = rel.split('/').find_map(bad_name) {
+        return Err(bad);
+    }
+    let mut top = None;
+    let mut dir = String::new();
+    for part in parent_of(rel).split('/').filter(|p| !p.is_empty()) {
+        dir = join_rel(&dir, part);
+        match kind(db, book, &dir)? {
+            Some(true) => {}
+            Some(false) => return Err(format!("\"{dir}\" is a file, not a folder")),
+            None => {
+                insert(db, book, &dir, None)?;
+                insert(db, book, &folder_note_path(&dir), Some(""))?;
+                top.get_or_insert(dir.clone());
+            }
+        }
+    }
+    // The note is the folder note of a folder just made: fill it in.
+    if top.is_some() && rel == folder_note_path(parent_of(rel)) {
+        write(db, book, rel, text)?;
+    } else if exists(db, book, rel)? {
+        return Err(format!("\"{rel}\" already exists"));
+    } else {
+        insert(db, book, rel, Some(text))?;
+    }
+    Ok(top.unwrap_or_else(|| rel.to_string()))
+}
+
 // Renames an entry inside its folder; returns the new book-relative path or an error message.
 // Renaming a folder renames its folder note along with it.
 pub fn rename_entry(db: &Connection, book: &str, rel: &str, new_name: &str) -> Result<String, String> {
@@ -334,6 +369,17 @@ pub mod tests {
         write(db, "b", "Scene.md", "").unwrap();
         assert!(move_entry(db, "b", "Scene.md", "Scene").is_err(), "no overwriting");
         assert!(move_entry(db, "b", "Scene.md", "Nowhere").is_err(), "needs an existing folder");
+
+        // Creating a note makes the folders on its way, each with a folder note.
+        assert_eq!(create_note(db, "b", "Part 2/Act 1/Arrival.md", "text"), Ok("Part 2".into()));
+        assert_eq!(read(db, "b", "Part 2/Act 1/Arrival.md").unwrap(), "text");
+        assert!(exists(db, "b", "Part 2/Part 2.md").unwrap() && exists(db, "b", "Part 2/Act 1/Act 1.md").unwrap());
+        assert_eq!(create_note(db, "b", "Part 2/Ideas.md", ""), Ok("Part 2/Ideas.md".into()));
+        assert!(create_note(db, "b", "Part 2/Ideas.md", "").is_err(), "no overwriting");
+        assert!(create_note(db, "b", "Part 2/Ideas", "").is_err(), "notes only");
+        assert!(create_note(db, "b", "Part 2/Ideas.md/x.md", "").is_err(), "not inside a note");
+        assert_eq!(create_note(db, "b", "Part 3/Part 3.md", "page"), Ok("Part 3".into()), "a new folder's own page");
+        assert_eq!(read(db, "b", "Part 3/Part 3.md").unwrap(), "page");
 
         // "Chapter 1x" shares a prefix with "Chapter 1" but isn't inside it.
         insert(db, "b", "Chapter 1x", None).unwrap();

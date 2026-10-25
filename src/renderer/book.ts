@@ -9,13 +9,13 @@ import { createFolderPage, type FolderPage } from './folderPage.ts'
 import { livePreview } from './livePreview.ts'
 import { isFolderNote } from './sections.ts'
 import { openSettings } from './settings.ts'
-import { createTabBar, loadTabs, nextTab, saveTabs } from './tabs.ts'
+import { createTabBar, imageName, loadTabs, nextTab, saveTabs } from './tabs.ts'
 import { h } from './ui.ts'
 
 const { api } = window
 
-// An open tab: a note, or empty (path null). While another tab is shown it keeps the note's
-// editor state (with its undo history) and scroll position.
+// An open tab: a note, an image (see imageTab), or empty (path null). While another tab is shown
+// it keeps the note's editor state (with its undo history) and scroll position.
 type Tab = { path: string | null; state?: EditorState; scroll?: StateEffect<unknown>; pageScroll?: number }
 
 type EditorOpts = {
@@ -37,6 +37,8 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
   let loads = 0
   let restored = false
   let page: FolderPage | null = null
+  // The image an image tab shows, in place of the editor.
+  let image: HTMLElement | null = null
   let tree: Entry[] = []
   // The editor the AI changes: the note, or the folder page's last focused text section.
   let focused: EditorView | null = null
@@ -91,7 +93,8 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
 
   // "Chapter 1 / Scene" for "Chapter 1/Scene.md"; a folder note shows as its folder.
   const showCrumbs = () => {
-    const parts = active?.path ? active.path.replace(/\.md$/, '').split('/') : []
+    const name = imageName(active?.path ?? null)
+    const parts = name ? [name] : active?.path ? active.path.replace(/\.md$/, '').split('/') : []
     if (parts.length > 1 && parts.at(-1) === parts.at(-2)) parts.pop()
     crumbs.replaceChildren(...parts.flatMap((p, i) => [...(i ? [h('span', { class: 'sep', textContent: '/' })] : []), h('span', { textContent: p })]))
   }
@@ -105,7 +108,8 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       else Object.assign(active, { state: view.state, scroll: view.scrollSnapshot() })
     }
     page?.destroy()
-    page = focused = null
+    image?.remove()
+    page = focused = image = null
     current = null
   }
 
@@ -118,6 +122,13 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     o.selected(path)
     main.classList.toggle('empty', !path)
     const n = ++loads
+    const name = imageName(path)
+    if (name) {
+      image = h('div', { class: 'image-view' }, h('img', { src: api.images.url(book, name), alt: name }))
+      pane.append(image)
+      view.dom.hidden = true
+      return
+    }
     const doc = path ? await api.files.read(path).catch(() => null) : ''
     if (n !== loads) return
     if (doc === null) {
@@ -208,7 +219,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       restored = true
       const saved = loadTabs(book)
       const all: Tab[] = saved.paths.map((path) => ({ path }))
-      const missing = (tab: Tab) => !!tab.path && !find(t, tab.path)
+      const missing = (tab: Tab) => !!tab.path && !imageName(tab.path) && !find(t, tab.path)
       active = nextTab(all, all[saved.active] ?? null, missing)
       tabs = all.filter((tab) => !missing(tab))
       load()
@@ -274,7 +285,7 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
       h('b', { textContent: book.title })
     )
   )
-  const assets = createAssets(book.id)
+  const assets = createAssets((path, newTab) => editor.open(path, newTab))
   const ribbon = createRibbon(nav, book.id, [
     { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) },
     { id: 'assets', title: 'Assets', icon: icons.image, el: assets.el, shown: assets.load }
@@ -283,7 +294,10 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
   root.replaceChildren(ribbon, nav, main)
   const editor = createEditor(main, pane, crumbs, book.id, {
     openNote: (path, newTab) => explorer.open(path, newTab),
-    selected: (path) => explorer.select(path),
+    selected(path) {
+      explorer.select(path)
+      assets.select(path)
+    },
     refresh: () => explorer.refresh()
   })
   main.append(

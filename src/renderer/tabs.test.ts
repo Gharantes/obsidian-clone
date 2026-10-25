@@ -1,11 +1,14 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { nextTab, tabTitle } from './tabs.ts'
+import { imageName, imageTab, nextTab, tabTitle } from './tabs.ts'
 
 test('tab titles', () => {
   assert.equal(tabTitle('Chapter 1/Scene.md'), 'Scene')
   assert.equal(tabTitle('Chapter 1/Chapter 1.md'), 'Chapter 1', 'folder note')
   assert.equal(tabTitle(null), 'New tab')
+  assert.equal(tabTitle(imageTab('Map.png')), 'Map.png', 'image')
+  assert.equal(imageName(imageTab('Map.png')), 'Map.png')
+  assert.equal(imageName('Map.md'), null)
 })
 
 test('closing tabs picks the nearest one left open', () => {

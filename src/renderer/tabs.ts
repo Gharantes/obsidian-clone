@@ -1,8 +1,16 @@
 import { h, showMenu } from './ui.ts'
 
-// "Scene" for "Chapter 1/Scene.md" (a folder note "A/A.md" is "A"); a tab with no note is "New tab".
+// A tab can show one of the book's images instead of a note; its path is the image's name with
+// this prefix (note paths always end in .md, so they never look like one).
+const IMAGE = 'image:'
+export const imageTab = (name: string) => IMAGE + name
+export const imageName = (path: string | null) => (path?.startsWith(IMAGE) ? path.slice(IMAGE.length) : null)
+
+// "Scene" for "Chapter 1/Scene.md" (a folder note "A/A.md" is "A"); an image tab is the image's
+// name and a tab with no note is "New tab".
 export function tabTitle(path: string | null): string {
-  return path ? path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/, '') : 'New tab'
+  if (!path) return 'New tab'
+  return imageName(path) ?? path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/, '')
 }
 
 // The tab to show after closing the tabs `drop` picks: the active one if it stays, else the

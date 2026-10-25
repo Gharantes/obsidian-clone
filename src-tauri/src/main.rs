@@ -375,6 +375,16 @@ async fn ai_detect_claude(app: AppHandle) -> Option<String> {
     ai::find_claude("", &home).await.map(|p| p.to_string_lossy().into_owned())
 }
 
+// The models a provider's saved server offers; empty when it can't be reached.
+#[tauri::command]
+async fn ai_models(app: AppHandle, provider: String) -> Vec<String> {
+    let cfg = app.state::<Mutex<App>>().lock().unwrap().settings.ai.apis.get(&provider).cloned();
+    match cfg {
+        Some(cfg) if !cfg.base_url.is_empty() => ai::list_models(&cfg).await.unwrap_or_default(),
+        _ => Vec::new(),
+    }
+}
+
 // Sends a tiny prompt to a provider (the selected one when None) with the saved settings;
 // resolves to { text } or { error }.
 #[tauri::command]
@@ -404,7 +414,7 @@ fn main() {
             fs_list, fs_read, fs_write, fs_rename, fs_nest, fs_move, fs_remove, fs_create, fs_create_note,
             chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,
-            ai_generate, ai_cancel, ai_detect_claude, ai_test, image_generate
+            ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_generate
         ])
         // Serves book images at img://localhost/<book id>%2F<name> (see convertFileSrc in the renderer).
         .register_uri_scheme_protocol("img", |ctx, req| {

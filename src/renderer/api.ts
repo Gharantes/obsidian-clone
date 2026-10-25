@@ -126,6 +126,8 @@ export const api = {
     cancel: (id: string): Promise<void> => invoke('ai_cancel', { id }),
     onChunk: (cb: (id: string, text: string) => void) => on('ai-chunk', ([id, text]) => cb(id, text)),
     detectClaude: (): Promise<string | null> => invoke('ai_detect_claude'),
+    // Model ids a local or custom server offers; empty when it can't be reached.
+    models: (provider: string): Promise<string[]> => invoke('ai_models', { provider }),
     // Tests a provider (the selected one by default) with the saved settings.
     test: (provider?: string): Promise<{ text: string } | { error: string }> => invoke('ai_test', { system: SYSTEM, provider })
   }

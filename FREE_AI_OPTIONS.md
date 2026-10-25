@@ -17,6 +17,8 @@ AI sidebar.
    **Test**, then pick it and its model in the sidebar. Servers without a section go under
    "Other OpenAI-compatible server". It's implemented in `src-tauri/src/ai.rs`
    (`openai_compatible`); the list of providers (`APIS`) is in `src/renderer/settings.ts`.
+   Each hosted provider has a fixed list of model ids there (checked 2026-10-25) that the
+   sidebar's model dropdown shows. Local servers list whatever models they have (`GET /models`).
 
 Anything that is *not* OpenAI-compatible would need a new provider function next to those two.
 
@@ -50,7 +52,6 @@ are fast but weaker.
 | OpenRouter | `https://openrouter.ai/api/v1` | `openrouter/free`, or any `…:free` model | 20 RPM; 50 req/day (1,000/day after buying $10 of credits once) | No | Free model list changes often |
 | Cerebras | `https://api.cerebras.ai/v1` | `gpt-oss-120b` | Free trial tier, ~1M tokens/day reported | Reports differ | Sources disagree on whether it's permanent |
 | Mistral | `https://api.mistral.ai/v1` | `mistral-small-latest` | "Experiment" tier, generous monthly tokens | No | Experiment tier requires opting into training on your data |
-| GitHub Models | `https://models.github.ai/inference` | `openai/gpt-4.1-mini` (check catalog) | ~15 RPM, 150–1,000 req/day | No | Needs a GitHub token with `models:read`; small context limits |
 | Cloudflare Workers AI | `https://api.cloudflare.com/client/v4/accounts/<ID>/ai/v1` | Llama / Mistral models | ~10K "neurons"/day | No | Needs account ID in the URL |
 | NVIDIA NIM | `https://integrate.api.nvidia.com/v1` | Llama / Nemotron | ~1,000 req/day reported | No | Developer program signup |
 | Hugging Face Inference Providers | `https://router.huggingface.co/v1` | many open models | Small monthly free credit | No | Credits run out quickly |
@@ -62,6 +63,7 @@ Baseten ($30). These are fine for trying a model, not for ongoing free use.
 
 ## Not usable here (or not free)
 
+- **GitHub Models**: retired on 2026-07-30 (playground, catalog and inference API).
 - **Cohere free key**: non-commercial only, and only partly OpenAI-compatible.
 - **ChatGPT / Claude.ai / Gemini web apps**: free in the browser, but have no API to call from
   an app.

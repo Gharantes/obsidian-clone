@@ -5,23 +5,80 @@ import { h, modal } from './ui.ts'
 const { api } = window
 
 // OpenAI-compatible APIs, each with its own section in Settings (see FREE_AI_OPTIONS.md).
-// `local` ones (and the custom server) take a base URL; the rest only need a key.
-type ApiInfo = { id: string; name: string; baseUrl: string; model: string; key: string; local?: boolean }
+// `models` are the ids to pick from in the sidebar, the first being the default; checked 2026-10-25
+// against each provider's model docs. `local` ones (and the custom server) take a base URL and list
+// whatever models the server has instead.
+type ApiInfo = { id: string; name: string; baseUrl: string; key: string; models: Record<string, string>; local?: boolean }
 export const APIS: ApiInfo[] = [
-  { id: 'gemini', name: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-3.8-flash', key: 'aistudio.google.com/apikey' },
-  { id: 'xai', name: 'xAI Grok', baseUrl: 'https://api.x.ai/v1', model: 'grok-4', key: 'console.x.ai' },
-  { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', key: 'console.groq.com/keys' },
-  { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'openrouter/free', key: 'openrouter.ai/keys' },
-  { id: 'mistral', name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', model: 'mistral-small-latest', key: 'console.mistral.ai' },
-  { id: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', model: 'gpt-oss-120b', key: 'cloud.cerebras.ai' },
-  { id: 'github', name: 'GitHub Models', baseUrl: 'https://models.github.ai/inference', model: 'openai/gpt-4.1-mini', key: 'a GitHub token with models:read' },
-  { id: 'ollama', name: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', model: 'llama3.2', key: '', local: true },
-  { id: 'lmstudio', name: 'LM Studio (local)', baseUrl: 'http://localhost:1234/v1', model: 'local-model', key: '', local: true },
-  { id: 'openai', name: 'Other OpenAI-compatible server', baseUrl: 'http://localhost:8080/v1', model: '', key: '', local: true }
+  {
+    id: 'gemini', name: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', key: 'aistudio.google.com/apikey',
+    models: {
+      'gemini-3.8-flash': 'Gemini 3.8 Flash',
+      'gemini-3.6-flash': 'Gemini 3.6 Flash',
+      'gemini-3.5-flash-lite': 'Gemini 3.5 Flash-Lite',
+      'gemini-3.1-flash-lite': 'Gemini 3.1 Flash-Lite',
+      'gemini-4-argon': 'Gemini 4 Argon (paid)',
+      'gemini-3.1-pro-preview': 'Gemini 3.1 Pro preview (paid)'
+    }
+  },
+  {
+    id: 'xai', name: 'xAI Grok', baseUrl: 'https://api.x.ai/v1', key: 'console.x.ai',
+    models: {
+      'grok-4.7': 'Grok 4.7',
+      'grok-4.6': 'Grok 4.6',
+      'grok-4.5': 'Grok 4.5',
+      'grok-4.3': 'Grok 4.3',
+      'grok-4.20-0309-reasoning': 'Grok 4.20 Reasoning',
+      'grok-4.20-0309-non-reasoning': 'Grok 4.20 (no reasoning)'
+    }
+  },
+  {
+    id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', key: 'console.groq.com/keys',
+    models: {
+      'openai/gpt-oss-120b': 'GPT-OSS 120B',
+      'openai/gpt-oss-20b': 'GPT-OSS 20B',
+      'llama-3.3-70b-versatile': 'Llama 3.3 70B',
+      'llama-3.1-8b-instant': 'Llama 3.1 8B Instant',
+      'qwen/qwen3.8-27b': 'Qwen 3.8 27B (preview)',
+      'minimaxai/minimax-m2.7': 'MiniMax M2.7 (preview)',
+      'meta-models/muse-spark-open': 'Muse Spark (preview)'
+    }
+  },
+  {
+    id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', key: 'openrouter.ai/keys',
+    models: {
+      'openrouter/free': 'Any free model (router)',
+      'google/gemma-4-31b-it:free': 'Gemma 4 31B (free)',
+      'google/gemma-4-26b-a4b-it:free': 'Gemma 4 26B A4B (free)',
+      'nvidia/nemotron-3-ultra-550b-a55b:free': 'Nemotron 3 Ultra (free)',
+      'nvidia/nemotron-3-super-120b-a12b:free': 'Nemotron 3 Super (free)',
+      'thinkingmachines/inkling:free': 'Inkling (free)',
+      'thinkingmachines/inkling-small:free': 'Inkling Small (free)'
+    }
+  },
+  {
+    id: 'mistral', name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', key: 'console.mistral.ai',
+    models: {
+      'mistral-small-latest': 'Mistral Small',
+      'mistral-medium-latest': 'Mistral Medium',
+      'mistral-large-latest': 'Mistral Large',
+      'ministral-14b-latest': 'Ministral 14B',
+      'ministral-8b-latest': 'Ministral 8B',
+      'ministral-3b-latest': 'Ministral 3B'
+    }
+  },
+  {
+    id: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', key: 'cloud.cerebras.ai',
+    models: { 'gpt-oss-120b': 'GPT-OSS 120B', 'qwen-3.8-27b': 'Qwen 3.8 27B' }
+  },
+  { id: 'ollama', name: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', key: '', models: {}, local: true },
+  { id: 'lmstudio', name: 'LM Studio (local)', baseUrl: 'http://localhost:1234/v1', key: '', models: {}, local: true },
+  { id: 'openai', name: 'Other OpenAI-compatible server', baseUrl: 'http://localhost:8080/v1', key: '', models: {}, local: true }
 ]
 
 // A provider's saved settings over its defaults.
-const apiOf = (ai: Settings['ai'], a: ApiInfo) => ({ baseUrl: a.baseUrl, model: a.model, apiKey: '', ...(ai.apis[a.id] as ApiConfig | undefined) })
+const apiOf = (ai: Settings['ai'], a: ApiInfo) =>
+  ({ baseUrl: a.baseUrl, model: Object.keys(a.models)[0] ?? '', apiKey: '', ...(ai.apis[a.id] as ApiConfig | undefined) })
 
 const field = (label: string, ...control: (Node | string)[]) => h('label', { class: 'field' }, h('span', { textContent: label }), ...control)
 
@@ -51,16 +108,38 @@ export function textPickers(): HTMLElement[] {
   const source = select(AI_SOURCES, 'claude-code', 'Where text is generated')
   const model = select(CLAUDE_MODELS, '', MODEL_TITLE)
   const effort = select(EFFORTS, '', EFFORT_TITLE)
-  const apiModel = h('input', { class: 'model', title: 'Model id', spellcheck: false })
+  const apiModel = h('select', { class: 'model', title: 'Model' })
   const current = () => APIS.find((a) => a.id === source.value)
+  // Models found on local servers, kept so the list shows right away next time.
+  const found: Record<string, Record<string, string>> = {}
+  const fill = (options: Record<string, string>, value: string) => {
+    if (Object.keys(options).join('\n') !== [...apiModel.options].map((o) => o.value).join('\n'))
+      apiModel.replaceChildren(...Object.entries(options).map(([value, textContent]) => h('option', { value, textContent })))
+    if (value) setValue(apiModel, value)
+  }
   const sync = (s: Settings) => {
     const a = current()
     model.hidden = effort.hidden = !!a
     apiModel.hidden = !a
-    if (a) {
-      apiModel.value = apiOf(s.ai, a).model
-      apiModel.placeholder = a.model || 'Model id'
+    if (!a) return
+    const saved = apiOf(s.ai, a).model
+    if (!a.local) {
+      // A model dropped from the list (retired, or an old default) moves to the current default.
+      fill(a.models, saved in a.models ? saved : Object.keys(a.models)[0])
+      if (apiModel.value !== saved) apiModel.onchange?.(new Event('change'))
+      return
     }
+    fill(found[a.id] ?? {}, saved)
+    api.ai.models(a.id).then((ids) => {
+      if (current() !== a) return
+      found[a.id] = ids.length ? Object.fromEntries(ids.map((id) => [id, id])) : { '': 'No models found. Is the server running?' }
+      fill(found[a.id], saved)
+      // Nothing picked yet (or it was removed from the server): use the first model it has.
+      if (ids.length && !ids.includes(saved)) {
+        apiModel.value = ids[0]
+        apiModel.onchange?.(new Event('change'))
+      }
+    })
   }
   const load = async () => {
     const s = await api.settings.get()
@@ -83,7 +162,7 @@ export function textPickers(): HTMLElement[] {
   effort.onchange = () => save(() => ({ claudeEffort: effort.value }))
   apiModel.onchange = () => {
     const a = current()
-    if (a) save((ai) => ({ apis: { ...ai.apis, [a.id]: { ...apiOf(ai, a), model: apiModel.value.trim() } } }))
+    if (a) save((ai) => ({ apis: { ...ai.apis, [a.id]: { ...apiOf(ai, a), model: apiModel.value } } }))
   }
   load()
   return [source, model, effort, apiModel]

@@ -230,6 +230,19 @@ async fn openai_compatible(cfg: &OpenAi, prompt: &str, system: &str, on_text: &m
     }
 }
 
+// The model ids an OpenAI-compatible server offers (GET /models), e.g. what's pulled in Ollama.
+pub async fn list_models(cfg: &OpenAi) -> Result<Vec<String>, String> {
+    let mut req = reqwest::Client::new().get(format!("{}/models", cfg.base_url.trim_end_matches('/'))).timeout(std::time::Duration::from_secs(5));
+    if !cfg.api_key.is_empty() {
+        req = req.bearer_auth(&cfg.api_key);
+    }
+    let body = req.send().await.and_then(|r| r.error_for_status()).map_err(|e| e.to_string())?.text().await.map_err(|e| e.to_string())?;
+    let json: Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    let mut ids: Vec<String> = json["data"].as_array().into_iter().flatten().filter_map(|m| m["id"].as_str().map(String::from)).collect();
+    ids.sort();
+    Ok(ids)
+}
+
 // Generates with the configured provider, calling on_text for each piece of the reply.
 pub async fn generate(ai: &Ai, home: &Path, workdir: &Path, prompt: &str, system: &str, on_text: &mut (dyn FnMut(&str) + Send), cancel: &CancellationToken) -> Result<(), String> {
     if ai.provider != "claude-code" {

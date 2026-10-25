@@ -1,25 +1,37 @@
 import { EditorView, basicSetup } from 'codemirror'
 import { EditorState } from '@codemirror/state'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
+import type { Entry } from './api.ts'
 import { createAi } from './ai.ts'
-import { createExplorer, movePath } from './explorer.ts'
+import { createExplorer, movePath, parentOf } from './explorer.ts'
+import { createFolderPage, type FolderPage } from './folderPage.ts'
 import { livePreview } from './livePreview.ts'
+import { isFolderNote } from './sections.ts'
 import { openSettings } from './settings.ts'
 import { h } from './ui.ts'
 
 const { api } = window
 
-// One editor for the open note; edits autosave 500 ms after the last change.
-function createEditor(pane: HTMLElement, crumbs: HTMLElement, book: string) {
+// The open note: one editor, or for a folder note the folder's page of sections.
+// Edits autosave 500 ms after the last change. `openNote` opens a note picked on a folder page.
+function createEditor(pane: HTMLElement, crumbs: HTMLElement, book: string, openNote: (path: string) => void) {
   let current: string | null = null
+  let page: FolderPage | null = null
+  let tree: Entry[] = []
+  // The editor the AI changes: the note, or the folder page's last focused text section.
+  let focused: EditorView | null = null
   let timer: ReturnType<typeof setTimeout> | undefined
   const save = () => {
     clearTimeout(timer)
     timer = undefined
-    if (current) api.files.write(current, view.state.doc.toString())
+    if (current) api.files.write(current, page ? page.text() : view.state.doc.toString())
+  }
+  const changed = () => {
+    clearTimeout(timer)
+    timer = setTimeout(save, 500)
   }
   const view = new EditorView({ parent: pane })
-  const ai = createAi(view, () => current)
+  const ai = createAi(() => (page ? (focused?.dom.isConnected ? focused : page.firstView()) : current ? view : null), () => current)
   const extensions = [
     basicSetup,
     markdown({ base: markdownLanguage }),
@@ -27,9 +39,8 @@ function createEditor(pane: HTMLElement, crumbs: HTMLElement, book: string) {
     ai.extension,
     EditorView.lineWrapping,
     EditorView.updateListener.of((u) => {
-      if (!u.docChanged) return
-      clearTimeout(timer)
-      timer = setTimeout(save, 500)
+      if (u.focusChanged && u.view.hasFocus) focused = u.view
+      if (u.docChanged) changed()
     })
   ]
 
@@ -43,12 +54,20 @@ function createEditor(pane: HTMLElement, crumbs: HTMLElement, book: string) {
   async function open(path: string | null) {
     ai.settle()
     if (timer) save()
+    page?.destroy()
+    page = focused = null
     current = path
-    view.setState(EditorState.create({ doc: path ? await api.files.read(path) : '', extensions }))
+    const doc = path ? await api.files.read(path) : ''
+    if (path && isFolderNote(path)) {
+      page = createFolderPage(doc, tree, { extensions, folder: () => parentOf(current!), changed, open: openNote })
+      pane.append(page.el)
+      view.setState(EditorState.create({ extensions }))
+    } else view.setState(EditorState.create({ doc, extensions }))
+    view.dom.hidden = !!page
     pane.parentElement!.classList.toggle('empty', !path)
     showCrumbs()
     // Don't steal focus from the explorer's rename box when a new note opens.
-    if (path && !(document.activeElement instanceof HTMLInputElement)) view.focus()
+    if (path && !page && !(document.activeElement instanceof HTMLInputElement)) view.focus()
   }
 
   return {
@@ -64,6 +83,10 @@ function createEditor(pane: HTMLElement, crumbs: HTMLElement, book: string) {
       clearTimeout(timer)
       timer = undefined
       open(null)
+    },
+    listed(t: Entry[]) {
+      tree = t
+      page?.setTree(t)
     }
   }
 }
@@ -77,7 +100,7 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
   const pane = h('div', { class: 'editor' })
   const aiButton = h('button', { class: 'ai-toggle', textContent: '✨ AI', title: 'Write with AI (Ctrl+J)' })
   const newNote = h('button', { textContent: '+ Note', title: 'New note' })
-  const newFolder = h('button', { textContent: '+ Folder', title: 'New folder (with a folder note)' })
+  const newFolder = h('button', { textContent: '+ Folder', title: 'New folder (opens as a page of sections)' })
 
   root.replaceChildren(
     h('nav', {},
@@ -98,7 +121,7 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
       )
     )
   )
-  const editor = createEditor(pane, crumbs, book.id)
+  const editor = createEditor(pane, crumbs, book.id, (path) => explorer.open(path))
   root.append(editor.ai.panel)
   const explorer = createExplorer(tree, editor)
   aiButton.onclick = () => editor.ai.toggle()

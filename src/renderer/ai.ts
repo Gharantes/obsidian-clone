@@ -23,14 +23,15 @@ const IMAGE = /\{\{image:\s*([^}]*)\}\}/g
 
 // AI chat sidebar for the editor (Ctrl/Cmd+J). Ask for anything; the AI answers and edits the note
 // itself (one undo step, with an Undo button on its message). Chats are saved with the book and
-// can be reopened from History. Drag the left edge to resize.
-export function createAi(view: EditorView, getPath: () => string | null) {
+// can be reopened from History. Drag the left edge to resize. `getView` is the editor it changes:
+// the note, or on a folder page the text section last focused.
+export function createAi(getView: () => EditorView | null, getPath: () => string | null) {
   const chats = window.api.ai.chats
   const history: Turn[] = []
   let chatId: string | null = null
   let job: string | null = null
   let stopped = false
-  let undo: { after: Text; el: HTMLElement } | null = null
+  let undo: { view: EditorView; after: Text; el: HTMLElement } | null = null
 
   const log = h('div', { class: 'messages' })
   const input = h('textarea', { placeholder: 'Ask AI to write or change anything in this note…' })
@@ -116,16 +117,18 @@ export function createAi(view: EditorView, getPath: () => string | null) {
   }
   function hide() {
     panel.hidden = true
-    view.focus()
+    getView()?.focus()
   }
 
   async function run() {
     const path = getPath()
+    const view = getView()
     const instruction = input.value.trim()
     if (!path || job || !instruction) return
-    input.value = ''
     hideList()
     if (!history.length) log.replaceChildren()
+    if (!view) return void message('assistant', 'Add a Text section to this folder first, then ask again.')
+    input.value = ''
     message('user', instruction)
     const reply = message('assistant', '…')
     reply.el.classList.add('pending')
@@ -158,7 +161,7 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     if (job !== id) return // settled by switching notes
     job = null
     setBusy(false)
-    if (!stopped && !error && p.edits.length && getPath() === path) apply(p.edits, reply.foot, note)
+    if (!stopped && !error && p.edits.length && getPath() === path && view.dom.isConnected) apply(view, p.edits, reply.foot, note)
   }
 
   // Replaces each {{image: …}} with an embed of a generated picture, one at a time.
@@ -174,7 +177,7 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     }
   }
 
-  function apply(edits: Edit[], foot: HTMLElement, note: (text: string, cls?: string) => void) {
+  function apply(view: EditorView, edits: Edit[], foot: HTMLElement, note: (text: string, cls?: string) => void) {
     const sel = view.state.selection.main
     const { changes, failed } = placeEdits(view.state.doc.toString(), sel.from, sel.to, edits)
     if (failed) note(`Couldn't find where to make ${failed === 1 ? 'one change' : `${failed} changes`}.`, 'error')
@@ -194,7 +197,7 @@ export function createAi(view: EditorView, getPath: () => string | null) {
       undo = null
     } })
     undo?.el.remove()
-    undo = { after: view.state.doc, el: btn }
+    undo = { view, after: view.state.doc, el: btn }
     foot.append(btn)
   }
 
@@ -215,7 +218,7 @@ export function createAi(view: EditorView, getPath: () => string | null) {
       added,
       keymap.of([{ key: 'Mod-j', run: () => (show(), true) }]),
       EditorView.updateListener.of((u) => {
-        if (u.docChanged && undo && u.state.doc !== undo.after) {
+        if (u.docChanged && undo?.view === u.view && u.state.doc !== undo.after) {
           undo.el.remove()
           undo = null
         }

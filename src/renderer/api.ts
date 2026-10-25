@@ -1,6 +1,7 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
 import { buildPrompt, outline, parentNotes, SYSTEM, type AiRequest, type Turn } from './prompt.ts'
+import { stripMarkers } from './sections.ts'
 
 // Folders carry `note` when they have a folder note ("X/X.md"); that note is left out of `children`.
 export type Entry = { path: string; name: string; folder: boolean; note?: string; children?: Entry[] }
@@ -78,7 +79,7 @@ async function generate(id: string, req: AiRequest): Promise<string | null> {
     const parents = []
     for (const p of parentNotes(req.path)) {
       const text = await files.read(p).catch(() => null)
-      if (text !== null) parents.push({ title: p.slice(p.lastIndexOf('/') + 1, -3), text })
+      if (text !== null) parents.push({ title: p.slice(p.lastIndexOf('/') + 1, -3), text: stripMarkers(text) })
     }
     const prompt = buildPrompt({ ...req, book: book.title, outline: outline(await files.list(), req.path), parents })
     return await invoke('ai_generate', { id, prompt, system: SYSTEM })

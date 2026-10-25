@@ -5,11 +5,13 @@ type Handlers = {
   open(path: string): void
   renamed(from: string, to: string): void
   deleted(path: string): void
+  // Called with the tree each time it is read.
+  listed(tree: Entry[]): void
 }
 
 const files = () => window.api.files
-const isNote = (e: Entry) => !e.folder && e.name.endsWith('.md')
-const label = (e: Entry) => (isNote(e) ? e.name.slice(0, -3) : e.name)
+export const isNote = (e: Entry) => !e.folder && e.name.endsWith('.md')
+export const label = (e: Entry) => (isNote(e) ? e.name.slice(0, -3) : e.name)
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 export const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf('/')))
 
@@ -21,7 +23,7 @@ export function movePath(p: string, from: string, to: string): string {
   return to + p.slice(from.length)
 }
 
-function find(entries: Entry[], path: string): Entry | undefined {
+export function find(entries: Entry[], path: string): Entry | undefined {
   for (const e of entries) {
     if (e.path === path) return e
     const hit = e.children && find(e.children, path)
@@ -89,9 +91,14 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
 
   const redraw = () => list.replaceChildren(...render(tree))
 
+  async function load() {
+    tree = await files().list()
+    h.listed(tree)
+  }
+
   async function refresh() {
     if (renaming) return
-    tree = await files().list()
+    await load()
     redraw()
   }
 
@@ -117,7 +124,7 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
     const items: MenuItem[] = []
     if (e.folder) {
       items.push({ label: 'New note', run: () => create(false, e.path) }, { label: 'New folder', run: () => create(true, e.path) })
-      if (!e.note) items.push({ label: 'Create folder note', run: () => createFolderNote(e) })
+      if (!e.note) items.push({ label: 'Create folder page', run: () => createFolderNote(e) })
       items.push('-')
     } else if (isNote(e)) items.push({ label: 'New note inside', run: () => nestAndCreate(e) }, '-')
     items.push({ label: 'Rename', run: () => startRename(e, row) }, { label: 'Delete', danger: true, run: () => remove(e) })
@@ -177,7 +184,7 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
   async function create(folder: boolean, parent = '') {
     const path = await files().create(folder, parent)
     for (let p = parent; p; p = parentOf(p)) expanded.add(p)
-    tree = await files().list()
+    await load()
     const entry = find(tree, path)
     const note = folder ? entry?.note : path
     if (note) openNote(note)
@@ -190,7 +197,7 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
     const path = `${e.path}/${e.name}.md`
     await files().write(path, '')
     expanded.add(e.path)
-    tree = await files().list()
+    await load()
     openNote(path)
   }
 
@@ -209,5 +216,11 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
     ])
   dropTarget(list, '')
   refresh()
-  return { create, refresh }
+  // Opens a note from outside the tree, expanding the folders it's in.
+  function open(path: string) {
+    for (let p = parentOf(path); p; p = parentOf(p)) expanded.add(p)
+    openNote(path)
+  }
+
+  return { create, refresh, open }
 }

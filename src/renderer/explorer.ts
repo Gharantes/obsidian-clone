@@ -54,6 +54,7 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
         arrow.className = 'arrow'
         arrow.onclick = (ev) => (ev.stopPropagation(), toggle(e.path))
         if (!e.children!.length) arrow.classList.add('none')
+        row.appendChild(document.createElement('span')).className = 'folder-icon'
       }
       row.appendChild(document.createElement('span')).textContent = label(e)
       // Ctrl/Cmd+click or middle-click opens the note in a new tab.

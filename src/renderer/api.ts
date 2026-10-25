@@ -109,7 +109,19 @@ async function generate(id: string, req: AiRequest): Promise<string | null> {
 const images = {
   generate: (id: string, prompt: string, width: number, height: number, book?: string): Promise<{ name: string } | { error: string }> =>
     invoke('image_generate', { id, prompt, width, height, book }),
-  list: (): Promise<string[]> => invoke('image_list'),
+  // `images` are [name, folder] pairs; '' is the top level.
+  list: (): Promise<{ folders: string[]; images: [string, string][] }> => invoke('image_list'),
+  // Asks for image files and copies them into the folder; `error` lists any that weren't added.
+  import: (folder: string): Promise<{ names: string[]; error: string | null }> => invoke('image_import', { folder }),
+  remove: (name: string): Promise<string | null> => invoke('image_remove', { name }),
+  move: (name: string, folder: string): Promise<string | null> => invoke('image_move', { name, folder }),
+  // Folders only organize images; they hold no notes. Deleting one deletes its images and
+  // resolves to their names.
+  folders: {
+    create: (parent: string, name: string): Moved => invoke('image_folder_create', { parent, name }),
+    move: (path: string, parent: string, name: string): Moved => invoke('image_folder_move', { path, parent, name }),
+    remove: (path: string): Promise<string[]> => invoke('image_folder_remove', { path })
+  },
   // Keeps the extension when the new name has none; notes embedding the image are updated.
   rename: (name: string, newName: string): Promise<{ name: string } | { error: string }> => invoke('image_rename', { name, newName }),
   // Asks where to save a copy; resolves to an error message, or null.

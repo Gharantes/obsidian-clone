@@ -302,7 +302,8 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
     renamed(from, to) {
       editor.renamed(imageTab(from), imageTab(to))
       editor.reload() // its embeds may have changed
-    }
+    },
+    deleted: (names) => names.forEach((n) => editor.deleted(imageTab(n)))
   })
   const ribbon = createRibbon(nav, book.id, [
     { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) },

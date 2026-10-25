@@ -1,4 +1,4 @@
-use crate::files::{bad_name, err, join_rel, parent_of};
+use crate::files::{bad_name, base_name, err, join_rel, parent_of};
 use crate::images;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
@@ -38,9 +38,15 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
         CREATE TABLE IF NOT EXISTS entries (
             book TEXT NOT NULL REFERENCES books ON DELETE CASCADE, path TEXT NOT NULL, text TEXT, PRIMARY KEY (book, path)
         );
-        -- Images embedded in notes as ![[name]], and book covers.
+        -- Images embedded in notes as ![[name]], and book covers. `folder` is a row of image_folders, or
+        -- '' for the top level.
         CREATE TABLE IF NOT EXISTS images (
-            book TEXT NOT NULL REFERENCES books ON DELETE CASCADE, name TEXT NOT NULL, data BLOB NOT NULL, PRIMARY KEY (book, name)
+            book TEXT NOT NULL REFERENCES books ON DELETE CASCADE, name TEXT NOT NULL, folder TEXT NOT NULL DEFAULT '', data BLOB NOT NULL,
+            PRIMARY KEY (book, name)
+        );
+        -- Folders that organize images, apart from the notes' folders; every folder's parent has a row.
+        CREATE TABLE IF NOT EXISTS image_folders (
+            book TEXT NOT NULL REFERENCES books ON DELETE CASCADE, path TEXT NOT NULL, PRIMARY KEY (book, path)
         );
         -- AI chats; `turns` is the JSON list of messages.
         CREATE TABLE IF NOT EXISTS chats (
@@ -51,6 +57,10 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
     // Databases made before covers lack the column.
     if db.prepare("SELECT cover FROM books LIMIT 0").is_err() {
         db.execute_batch("ALTER TABLE books ADD COLUMN cover TEXT")?;
+    }
+    // And before image folders.
+    if db.prepare("SELECT folder FROM images LIMIT 0").is_err() {
+        db.execute_batch("ALTER TABLE images ADD COLUMN folder TEXT NOT NULL DEFAULT ''")?;
     }
     Ok(db)
 }
@@ -129,8 +139,14 @@ pub fn remove(db: &Connection, id: &str) -> Result<(), String> {
 
 // Paths are book-relative; folders have no text.
 type Entries = Vec<(String, Option<String>)>;
-// Image file name and bytes.
+// Image file path and bytes.
 type Images = Vec<(String, Vec<u8>)>;
+
+// The image folder for a folder of the imported files: "attachments/Maps" (as exported) is
+// "Maps", "attachments" the top level; None for other folders.
+fn attachments_folder(dir: &str) -> Option<&str> {
+    if dir == ATTACHMENTS { Some("") } else { dir.strip_prefix(ATTACHMENTS).and_then(|d| d.strip_prefix('/')) }
+}
 
 // Color and cover image name from .book.json.
 fn read_meta(meta: &str) -> (Option<String>, Option<String>) {
@@ -140,17 +156,24 @@ fn read_meta(meta: &str) -> (Option<String>, Option<String>) {
 }
 
 // Creates a book from imported entries, adding any missing parent folders. Returns its id.
+// Images keep the folder they were in (see attachments_folder), and folders under attachments/
+// become image folders rather than notes' folders.
 fn import(db: &Connection, title: &str, (color, cover): (Option<String>, Option<String>), entries: Entries, imgs: Images) -> Result<String, String> {
     let tx = db.unchecked_transaction().map_err(err)?;
     let id = create(&tx, title, color.as_deref())?;
-    for (name, data) in &imgs {
-        images::add(&tx, &id, name, data)?;
+    for (path, data) in &imgs {
+        let dir = parent_of(path);
+        images::add(&tx, &id, attachments_folder(dir).unwrap_or(dir), base_name(path), data)?;
     }
-    if let Some(cover) = cover.filter(|c| imgs.iter().any(|(n, _)| n == c)) {
+    if let Some(cover) = cover.filter(|c| imgs.iter().any(|(p, _)| base_name(p) == c)) {
         set_cover(&tx, &id, Some(&cover))?;
     }
     let mut add = tx.prepare("INSERT OR IGNORE INTO entries (book, path, text) VALUES (?1, ?2, ?3)").map_err(err)?;
     for (path, text) in &entries {
+        if let (None, Some(folder)) = (text, attachments_folder(path)) {
+            images::add_folder(&tx, &id, folder)?;
+            continue;
+        }
         let mut dir = parent_of(path);
         let mut parents = Vec::new();
         while !dir.is_empty() {
@@ -167,7 +190,7 @@ fn import(db: &Connection, title: &str, (color, cover): (Option<String>, Option<
     Ok(id)
 }
 
-// Collects folders, .md notes and images; other files are skipped. Images are keyed by file name.
+// Collects folders, .md notes and images; other files are skipped.
 fn walk(root: &Path, dir: &str, out: &mut Entries, imgs: &mut Images) -> std::io::Result<()> {
     for d in fs::read_dir(root.join(dir))? {
         let d = d?;
@@ -180,7 +203,7 @@ fn walk(root: &Path, dir: &str, out: &mut Entries, imgs: &mut Images) -> std::io
             out.push((path.clone(), None));
             walk(root, &path, out, imgs)?;
         } else if images::is_image_name(&name) {
-            imgs.push((name, fs::read(d.path())?));
+            imgs.push((path, fs::read(d.path())?));
         } else if let Some(text) = name.ends_with(".md").then(|| fs::read_to_string(d.path()).ok()).flatten() {
             out.push((path, Some(text)));
         }
@@ -215,7 +238,7 @@ pub fn import_zip(db: &Connection, file: &Path) -> Result<String, String> {
         } else if images::is_image_name(&path) {
             let mut data = Vec::new();
             f.read_to_end(&mut data).map_err(err)?;
-            imgs.push((crate::files::base_name(&path).to_string(), data));
+            imgs.push((path, data));
         } else if path.ends_with(".md") && f.read_to_string(&mut text).is_ok() {
             entries.push((path, Some(text)));
         }
@@ -234,8 +257,12 @@ pub fn export_zip(db: &Connection, id: &str, file: &Path) -> Result<(), String> 
     let opts = SimpleFileOptions::default();
     zip.start_file(META, opts).map_err(err)?;
     zip.write_all(serde_json::json!({ "color": color, "cover": cover }).to_string().as_bytes()).map_err(err)?;
-    for (name, data) in images::all(db, id)? {
-        zip.start_file(format!("{ATTACHMENTS}/{name}"), opts).map_err(err)?;
+    // Image folders as attachments/ subfolders, so empty ones are kept too.
+    for folder in images::list(db, id)?.folders {
+        zip.add_directory(format!("{ATTACHMENTS}/{folder}"), opts).map_err(err)?;
+    }
+    for (folder, name, data) in images::all(db, id)? {
+        zip.start_file(join_rel(&join_rel(ATTACHMENTS, &folder), &name), opts).map_err(err)?;
         zip.write_all(&data).map_err(err)?;
     }
     for (path, text) in entries {
@@ -298,7 +325,8 @@ mod tests {
         assert_eq!((book.title.as_str(), book.color.as_str(), book.notes), ("Old Book", "#123456", 3), "skips other files and dot-files");
         assert_eq!(book.cover.as_deref(), Some("Map.png"));
         assert_eq!(images::get(db, &id, "Map.png").unwrap().as_deref(), Some(&b"\x89PNG"[..]), "images are keyed by file name");
-        assert_eq!(images::names(db, &id).unwrap(), ["Map.png"]);
+        assert_eq!(images::list(db, &id).unwrap().images, [("Map.png".into(), "Part 1".into())], "keeps the image's folder");
+        images::create_folder(db, &id, "Part 1", "Empty").unwrap();
 
         let zip = dir.with_extension("zip");
         export_zip(db, &id, &zip).unwrap();
@@ -307,6 +335,7 @@ mod tests {
         assert_eq!(files::read(db, &copy, "Part 1/Scenes/Scene.md").unwrap(), "Part 1/Scenes/Scene.md");
         assert_eq!(title(db, &copy).unwrap(), "Old Book");
         assert_eq!(images::all(db, &copy).unwrap(), images::all(db, &id).unwrap(), "round-trips images");
+        assert_eq!(images::list(db, &copy).unwrap(), images::list(db, &id).unwrap(), "and their folders");
         assert_eq!(list(db).unwrap().into_iter().find(|b| b.id == copy).unwrap().cover.as_deref(), Some("Map.png"));
     }
 }

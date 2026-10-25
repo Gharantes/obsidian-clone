@@ -337,11 +337,57 @@ async fn ai_generate(app: AppHandle, window: WebviewWindow, id: String, prompt: 
     r.err()
 }
 
-// Generates an image into a book (the window's book when `book` is None); resolves to { name } or { error }.
-// Cancelled with ai_cancel, like text.
+// --- The window's book's images and their folders ---
+
 #[tauri::command]
-fn image_list(state: AppState, window: WebviewWindow) -> Result<Vec<String>, String> {
-    in_book(&state, &window, images::names)?
+fn image_list(state: AppState, window: WebviewWindow) -> Result<images::Listing, String> {
+    in_book(&state, &window, images::list)?
+}
+
+// Copies image files the user picks into a folder; resolves to { names, error }, `error` listing
+// the files that weren't added (null when all were).
+#[tauri::command]
+async fn image_import(app: AppHandle, window: WebviewWindow, folder: String) -> Result<Value, String> {
+    let picked = window.dialog().file().set_parent(&window).add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp"]).blocking_pick_files().unwrap_or_default();
+    let (mut names, mut errors) = (Vec::new(), Vec::new());
+    for file in picked.into_iter().filter_map(|f| f.into_path().ok()) {
+        let file_name = file.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
+        let added = std::fs::read(&file)
+            .map_err(|e| format!("\"{file_name}\": {e}"))
+            .and_then(|data| in_book(&app.state::<Mutex<App>>(), &window, |db, b| images::import(db, b, &folder, &file_name, &data))?);
+        match added {
+            Ok(name) => names.push(name),
+            Err(e) => errors.push(e),
+        }
+    }
+    Ok(json!({ "names": names, "error": (!errors.is_empty()).then(|| errors.join("\n")) }))
+}
+
+#[tauri::command]
+fn image_remove(state: AppState, window: WebviewWindow, name: String) -> Result<Option<String>, String> {
+    in_book(&state, &window, |db, b| images::remove(db, b, &name).err())
+}
+
+#[tauri::command]
+fn image_move(state: AppState, window: WebviewWindow, name: String, folder: String) -> Result<Option<String>, String> {
+    in_book(&state, &window, |db, b| images::move_to(db, b, &name, &folder).err())
+}
+
+#[tauri::command]
+fn image_folder_create(state: AppState, window: WebviewWindow, parent: String, name: String) -> Result<Value, String> {
+    in_book(&state, &window, |db, b| moved(images::create_folder(db, b, &parent, &name)))
+}
+
+// Renames and/or moves an image folder to `parent`/`name`.
+#[tauri::command]
+fn image_folder_move(state: AppState, window: WebviewWindow, path: String, parent: String, name: String) -> Result<Value, String> {
+    in_book(&state, &window, |db, b| moved(images::move_folder(db, b, Some(&path), &parent, &name)))
+}
+
+// Deletes an image folder and everything in it; resolves to the deleted images' names.
+#[tauri::command]
+fn image_folder_remove(state: AppState, window: WebviewWindow, path: String) -> Result<Vec<String>, String> {
+    in_book(&state, &window, |db, b| images::remove_folder(db, b, &path))?
 }
 
 #[tauri::command]
@@ -366,6 +412,8 @@ async fn image_save(app: AppHandle, window: WebviewWindow, name: String) -> Opti
     std::fs::write(file, data).err().map(|e| e.to_string())
 }
 
+// Generates an image into a book (the window's book when `book` is None); resolves to { name } or { error }.
+// Cancelled with ai_cancel, like text.
 #[tauri::command]
 async fn image_generate(app: AppHandle, window: WebviewWindow, id: String, prompt: String, width: u32, height: u32, book: Option<String>) -> Value {
     let cancel = CancellationToken::new();
@@ -378,7 +426,7 @@ async fn image_generate(app: AppHandle, window: WebviewWindow, id: String, promp
     let r = match found {
         Ok((book, cfg)) => images::generate(&cfg, &prompt, width, height, &cancel).await.and_then(|data| {
             let name = format!("AI image {}.{}", books::now_ms(), images::kind(&data).unwrap().0);
-            images::add(&app.state::<Mutex<App>>().lock().unwrap().db, &book, &name, &data).map(|_| name)
+            images::add(&app.state::<Mutex<App>>().lock().unwrap().db, &book, "", &name, &data).map(|_| name)
         }),
         Err(e) => Err(e),
     };
@@ -441,7 +489,8 @@ fn main() {
             fs_list, fs_read, fs_write, fs_rename, fs_nest, fs_move, fs_remove, fs_create, fs_create_note,
             chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,
-            ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_list, image_rename, image_save, image_generate
+            ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_list, image_import, image_remove, image_move, image_folder_create, image_folder_move, image_folder_remove, image_rename, image_save,
+            image_generate
         ])
         // Serves book images at img://localhost/<book id>%2F<name> (see convertFileSrc in the renderer).
         .register_uri_scheme_protocol("img", |ctx, req| {

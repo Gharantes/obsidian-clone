@@ -1,4 +1,4 @@
-use crate::files::{bad_name, err};
+use crate::files::{bad_name, err, join_rel, parent_of};
 use crate::settings::Image;
 use base64::Engine;
 use rusqlite::{params, Connection, OptionalExtension};
@@ -25,17 +25,147 @@ pub fn get(db: &Connection, book: &str, name: &str) -> Result<Option<Vec<u8>>, S
     db.query_row("SELECT data FROM images WHERE book = ?1 AND name = ?2", params![book, name], |r| r.get(0)).optional().map_err(err)
 }
 
-// Adds an image unless one with that name exists.
-pub fn add(db: &Connection, book: &str, name: &str, data: &[u8]) -> Result<(), String> {
-    db.execute("INSERT OR IGNORE INTO images (book, name, data) VALUES (?1, ?2, ?3)", params![book, name, data]).map_err(err)?;
+// Adds an image to a folder ("" = top level; made if missing) unless one with that name exists.
+// Names are unique across folders, so notes embed images by name alone.
+pub fn add(db: &Connection, book: &str, folder: &str, name: &str, data: &[u8]) -> Result<(), String> {
+    add_folder(db, book, folder)?;
+    db.execute("INSERT OR IGNORE INTO images (book, name, folder, data) VALUES (?1, ?2, ?3, ?4)", params![book, name, folder, data]).map_err(err)?;
     Ok(())
 }
 
-// The book's image names, in name order.
-pub fn names(db: &Connection, book: &str) -> Result<Vec<String>, String> {
-    let mut stmt = db.prepare("SELECT name FROM images WHERE book = ?1 ORDER BY name COLLATE NOCASE").map_err(err)?;
-    let rows = stmt.query_map([book], |r| r.get(0)).map_err(err)?.collect::<Result<_, _>>().map_err(err);
-    rows
+// `name`, or "Map 1.png", "Map 2.png"... when an image already has it.
+fn free_name(db: &Connection, book: &str, name: &str) -> Result<String, String> {
+    let (stem, ext) = name.rsplit_once('.').map_or((name, String::new()), |(s, e)| (s, format!(".{e}")));
+    let mut candidate = name.to_string();
+    for i in 1.. {
+        if get(db, book, &candidate)?.is_none() {
+            break;
+        }
+        candidate = format!("{stem} {i}{ext}");
+    }
+    Ok(candidate)
+}
+
+// Adds an image file's bytes to a folder under a free name; returns the name.
+pub fn import(db: &Connection, book: &str, folder: &str, file_name: &str, data: &[u8]) -> Result<String, String> {
+    let (ext, _) = kind(data).ok_or(format!("\"{file_name}\" is not a PNG, JPEG, GIF or WebP image"))?;
+    let name = if is_image_name(file_name) { file_name.to_string() } else { format!("{file_name}.{ext}") };
+    let name = free_name(db, book, &name)?;
+    if !folder_exists(db, book, folder)? {
+        return Err(format!("\"{folder}\" no longer exists"));
+    }
+    add(db, book, folder, &name, data)?;
+    Ok(name)
+}
+
+// Image folders only organize images (no notes or sections); every folder's parent has a row too.
+pub fn add_folder(db: &Connection, book: &str, path: &str) -> Result<(), String> {
+    let mut dir = path;
+    while !dir.is_empty() {
+        db.execute("INSERT OR IGNORE INTO image_folders (book, path) VALUES (?1, ?2)", params![book, dir]).map_err(err)?;
+        dir = parent_of(dir);
+    }
+    Ok(())
+}
+
+fn folder_exists(db: &Connection, book: &str, path: &str) -> Result<bool, String> {
+    let found = db.query_row("SELECT 1 FROM image_folders WHERE book = ?1 AND path = ?2", params![book, path], |_| Ok(())).optional().map_err(err)?;
+    Ok(path.is_empty() || found.is_some())
+}
+
+// SQL matching a folder `?2` and everything under it, in column `col`.
+fn under(col: &str) -> String {
+    format!("({col} = ?2 OR substr({col}, 1, length(?2) + 1) = ?2 || '/')")
+}
+
+#[derive(serde::Serialize, Debug, PartialEq)]
+pub struct Listing {
+    // Folder paths ("A/B"), sorted.
+    pub folders: Vec<String>,
+    // (name, folder) of every image, sorted by name.
+    pub images: Vec<(String, String)>,
+}
+
+pub fn list(db: &Connection, book: &str) -> Result<Listing, String> {
+    let mut stmt = db.prepare("SELECT path FROM image_folders WHERE book = ?1 ORDER BY path COLLATE NOCASE").map_err(err)?;
+    let folders = stmt.query_map([book], |r| r.get(0)).map_err(err)?.collect::<Result<_, _>>().map_err(err)?;
+    let mut stmt = db.prepare("SELECT name, folder FROM images WHERE book = ?1 ORDER BY name COLLATE NOCASE").map_err(err)?;
+    let images = stmt.query_map([book], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?.collect::<Result<_, _>>().map_err(err)?;
+    Ok(Listing { folders, images })
+}
+
+// Deletes an image, and the book cover if it was that image.
+pub fn remove(db: &Connection, book: &str, name: &str) -> Result<(), String> {
+    db.execute("DELETE FROM images WHERE book = ?1 AND name = ?2", params![book, name]).map_err(err)?;
+    db.execute("UPDATE books SET cover = NULL WHERE id = ?1 AND cover = ?2", params![book, name]).map_err(err)?;
+    Ok(())
+}
+
+// Moves an image into an existing folder ("" = top level).
+pub fn move_to(db: &Connection, book: &str, name: &str, folder: &str) -> Result<(), String> {
+    if !folder_exists(db, book, folder)? {
+        return Err(format!("\"{folder}\" no longer exists"));
+    }
+    db.execute("UPDATE images SET folder = ?3 WHERE book = ?1 AND name = ?2", params![book, name, folder]).map_err(err)?;
+    Ok(())
+}
+
+// Makes folder `name` in `parent`; returns its path.
+pub fn create_folder(db: &Connection, book: &str, parent: &str, name: &str) -> Result<String, String> {
+    move_folder(db, book, None, parent, name)
+}
+
+// Moves and/or renames folder `path` (with everything in it) to `parent`/`name`, or with `path`
+// None makes a new folder there. Returns the folder's new path.
+pub fn move_folder(db: &Connection, book: &str, path: Option<&str>, parent: &str, name: &str) -> Result<String, String> {
+    let name = name.trim();
+    if let Some(bad) = bad_name(name) {
+        return Err(bad);
+    }
+    let to = join_rel(parent, name);
+    if path == Some(to.as_str()) {
+        return Ok(to);
+    }
+    if path.is_some_and(|p| parent == p || parent.starts_with(&format!("{p}/"))) {
+        return Err("A folder can't go inside itself".into());
+    }
+    if !folder_exists(db, book, parent)? {
+        return Err(format!("\"{parent}\" no longer exists"));
+    }
+    // Case-insensitive, since exported folders land on disk (renaming "maps" to "Maps" is fine).
+    let taken = db
+        .query_row("SELECT 1 FROM image_folders WHERE book = ?1 AND path = ?2 COLLATE NOCASE AND path != ?3", params![book, to, path.unwrap_or("")], |_| Ok(()))
+        .optional()
+        .map_err(err)?;
+    if taken.is_some() {
+        return Err(format!("\"{name}\" already exists"));
+    }
+    let Some(from) = path else {
+        add_folder(db, book, &to)?;
+        return Ok(to);
+    };
+    let tx = db.unchecked_transaction().map_err(err)?;
+    let sql = |table: &str, col: &str| format!("UPDATE {table} SET {col} = ?3 || substr({col}, length(?2) + 1) WHERE book = ?1 AND {}", under(col));
+    tx.execute(&sql("image_folders", "path"), params![book, from, to]).map_err(err)?;
+    tx.execute(&sql("images", "folder"), params![book, from, to]).map_err(err)?;
+    tx.commit().map_err(err)?;
+    Ok(to)
+}
+
+// Deletes a folder, its subfolders and their images; returns the deleted images' names.
+pub fn remove_folder(db: &Connection, book: &str, path: &str) -> Result<Vec<String>, String> {
+    let tx = db.unchecked_transaction().map_err(err)?;
+    let names: Vec<String> = {
+        let mut stmt = tx.prepare(&format!("SELECT name FROM images WHERE book = ?1 AND {}", under("folder"))).map_err(err)?;
+        let rows = stmt.query_map(params![book, path], |r| r.get(0)).map_err(err)?.collect::<Result<_, _>>().map_err(err)?;
+        rows
+    };
+    for n in &names {
+        remove(&tx, book, n)?;
+    }
+    tx.execute(&format!("DELETE FROM image_folders WHERE book = ?1 AND {}", under("path")), params![book, path]).map_err(err)?;
+    tx.commit().map_err(err)?;
+    Ok(names)
 }
 
 // Renames an image, keeping its extension when the new name has none, and points the notes that
@@ -74,9 +204,10 @@ pub fn rename(db: &Connection, book: &str, name: &str, new_name: &str) -> Result
     Ok(new_name)
 }
 
-pub fn all(db: &Connection, book: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
-    let mut stmt = db.prepare("SELECT name, data FROM images WHERE book = ?1 ORDER BY name").map_err(err)?;
-    let rows = stmt.query_map([book], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?.collect::<Result<_, _>>().map_err(err);
+// (folder, name, bytes) of every image.
+pub fn all(db: &Connection, book: &str) -> Result<Vec<(String, String, Vec<u8>)>, String> {
+    let mut stmt = db.prepare("SELECT folder, name, data FROM images WHERE book = ?1 ORDER BY name").map_err(err)?;
+    let rows = stmt.query_map([book], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(err)?.collect::<Result<_, _>>().map_err(err);
     rows
 }
 
@@ -156,17 +287,52 @@ mod tests {
     #[test]
     fn rename_updates_embeds_and_cover() {
         let db = &crate::files::tests::test_db();
-        add(db, "b", "Map.png", b"\x89PNG").unwrap();
-        add(db, "b", "Other.png", b"\x89PNG").unwrap();
+        add(db, "b", "", "Map.png", b"\x89PNG").unwrap();
+        add(db, "b", "", "Other.png", b"\x89PNG").unwrap();
         crate::books::set_cover(db, "b", Some("Map.png")).unwrap();
         crate::files::write(db, "b", "Note.md", "![[Map.png]] and ![[Map.png|alt]], not ![[Map.png.png]]").unwrap();
 
         assert_eq!(rename(db, "b", "Map.png", "World").unwrap(), "World.png", "keeps the extension");
-        assert_eq!(names(db, "b").unwrap(), ["Other.png", "World.png"]);
+        assert_eq!(list(db, "b").unwrap().images, [("Other.png".into(), "".into()), ("World.png".into(), "".into())]);
         assert_eq!(crate::files::read(db, "b", "Note.md").unwrap(), "![[World.png]] and ![[World.png|alt]], not ![[Map.png.png]]");
         assert_eq!(crate::books::list(db).unwrap()[0].cover.as_deref(), Some("World.png"));
         assert!(rename(db, "b", "World.png", "Other.png").unwrap_err().contains("already exists"));
         assert!(rename(db, "b", "World.png", "a/b").is_err());
+    }
+
+    #[test]
+    fn folders() {
+        let db = &crate::files::tests::test_db();
+        let png = b"\x89PNG";
+        let folders = |db| list(db, "b").unwrap().folders;
+        let images = |db| list(db, "b").unwrap().images.into_iter().map(|(n, f)| format!("{f}:{n}")).collect::<Vec<_>>();
+
+        assert_eq!(import(db, "b", "", "Map.png", png).unwrap(), "Map.png");
+        assert_eq!(import(db, "b", "", "Map.png", png).unwrap(), "Map 1.png", "names stay unique");
+        assert_eq!(import(db, "b", "", "photo", png).unwrap(), "photo.png");
+        assert!(import(db, "b", "", "notes.png", b"hello").is_err(), "checks the bytes");
+        assert!(import(db, "b", "Nope", "x.png", png).is_err());
+
+        assert_eq!(create_folder(db, "b", "", "Maps").unwrap(), "Maps");
+        assert_eq!(create_folder(db, "b", "Maps", "Old").unwrap(), "Maps/Old");
+        assert!(create_folder(db, "b", "", "maps").unwrap_err().contains("already exists"));
+        assert!(create_folder(db, "b", "", "a/b").is_err());
+        move_to(db, "b", "Map.png", "Maps/Old").unwrap();
+        assert!(move_to(db, "b", "Map 1.png", "Nope").is_err());
+        assert_eq!(images(db), [":Map 1.png", "Maps/Old:Map.png", ":photo.png"]);
+
+        assert!(move_folder(db, "b", Some("Maps"), "Maps/Old", "Maps").is_err(), "not into itself");
+        assert_eq!(move_folder(db, "b", Some("Maps/Old"), "", "Archive").unwrap(), "Archive");
+        assert_eq!(move_folder(db, "b", Some("Maps"), "Archive", "Maps").unwrap(), "Archive/Maps");
+        assert_eq!(folders(db), ["Archive", "Archive/Maps"]);
+        assert_eq!(images(db), [":Map 1.png", "Archive:Map.png", ":photo.png"]);
+
+        crate::books::set_cover(db, "b", Some("Map.png")).unwrap();
+        assert_eq!(remove_folder(db, "b", "Archive").unwrap(), ["Map.png"]);
+        assert!(folders(db).is_empty());
+        assert_eq!(crate::books::list(db).unwrap()[0].cover, None, "the cover went with it");
+        remove(db, "b", "photo.png").unwrap();
+        assert_eq!(images(db), [":Map 1.png"]);
     }
 
     #[test]

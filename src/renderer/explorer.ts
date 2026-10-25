@@ -2,7 +2,7 @@ import type { Entry } from './api.ts'
 import { showMenu, type MenuItem } from './ui.ts'
 
 type Handlers = {
-  open(path: string): void
+  open(path: string, newTab?: boolean): void
   renamed(from: string, to: string): void
   deleted(path: string): void
   // Called with the tree each time it is read.
@@ -56,7 +56,15 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
         if (!e.children!.length) arrow.classList.add('none')
       }
       row.appendChild(document.createElement('span')).textContent = label(e)
-      row.onclick = () => (e.note ? (expanded.add(e.path), openNote(e.note)) : e.folder ? toggle(e.path) : isNote(e) && openNote(e.path))
+      // Ctrl/Cmd+click or middle-click opens the note in a new tab.
+      const target = e.note ?? (isNote(e) ? e.path : undefined)
+      row.onclick = (ev) => {
+        if (e.folder && !e.note) return toggle(e.path)
+        if (e.note) expanded.add(e.path)
+        if (target) openNote(target, ev.ctrlKey || ev.metaKey)
+      }
+      row.onmousedown = (ev) => ev.button === 1 && ev.preventDefault()
+      row.onauxclick = (ev) => ev.button === 1 && target && openNote(target, true)
       row.oncontextmenu = (ev) => showMenu(ev, menuFor(e, row))
       row.draggable = true
       row.ondragstart = (ev) => {
@@ -107,9 +115,9 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
     redraw()
   }
 
-  function openNote(path: string) {
+  function openNote(path: string, newTab = false) {
     active = path
-    h.open(path)
+    h.open(path, newTab)
     redraw()
   }
 
@@ -122,6 +130,8 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
 
   function menuFor(e: Entry, row: HTMLElement): MenuItem[] {
     const items: MenuItem[] = []
+    const note = e.note ?? (isNote(e) ? e.path : undefined)
+    if (note) items.push({ label: 'Open in new tab', run: () => openNote(note, true) }, '-')
     if (e.folder) {
       items.push({ label: 'New note', run: () => create(false, e.path) }, { label: 'New folder', run: () => create(true, e.path) })
       if (!e.note) items.push({ label: 'Create folder page', run: () => createFolderNote(e) })
@@ -217,10 +227,17 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
   dropTarget(list, '')
   refresh()
   // Opens a note from outside the tree, expanding the folders it's in.
-  function open(path: string) {
+  function open(path: string, newTab = false) {
     for (let p = parentOf(path); p; p = parentOf(p)) expanded.add(p)
-    openNote(path)
+    openNote(path, newTab)
   }
 
-  return { create, refresh, open }
+  // Highlights the note in the active tab.
+  function select(path: string | null) {
+    if (path === active) return
+    active = path
+    if (!renaming) redraw()
+  }
+
+  return { create, refresh, open, select }
 }

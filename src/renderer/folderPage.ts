@@ -11,17 +11,25 @@ type Opts = {
   // Path of the folder, which can change while the page is open (renames).
   folder: () => string
   changed(): void
-  open(path: string): void
+  open(path: string, newTab: boolean): void
 }
 
 type Block = { kind: Section['kind']; el: HTMLElement; view?: EditorView }
 
 // Nested list of a folder's notes and subfolders; folders with a folder note open it.
-function index(entries: Entry[], open: (path: string) => void): HTMLElement {
+// Ctrl/Cmd+click or middle-click opens one in a new tab.
+function index(entries: Entry[], open: Opts['open']): HTMLElement {
   const items = entries.filter((e) => e.folder || isNote(e))
   return h('ul', {}, ...items.map((e) => {
     const target = e.folder ? e.note : e.path
-    const name = target ? h('button', { textContent: label(e), onclick: () => open(target) }) : h('span', { textContent: label(e) })
+    const name = target
+      ? h('button', {
+          textContent: label(e),
+          onclick: (ev: MouseEvent) => open(target, ev.ctrlKey || ev.metaKey),
+          onmousedown: (ev: MouseEvent) => ev.button === 1 && ev.preventDefault(),
+          onauxclick: (ev: MouseEvent) => ev.button === 1 && open(target, true)
+        })
+      : h('span', { textContent: label(e) })
     return h('li', { class: e.folder ? 'folder' : '' }, name, ...(e.children?.length ? [index(e.children, open)] : []))
   }))
 }

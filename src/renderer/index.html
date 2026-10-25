@@ -84,6 +84,19 @@
       main.empty .editor, main.empty .note-head, main.empty ~ .ai-panel, main:not(.empty) .placeholder { display: none !important; }
       .placeholder { text-align: center; margin-top: 30vh; padding: 0 24px; color: var(--muted); }
       .placeholder p:first-child { font-size: 16px; color: var(--fg); }
+      .placeholder .links { display: flex; justify-content: center; gap: 8px; margin-top: 16px; }
+      main.no-tabs .close-tab { display: none; }
+
+      .tabs { flex: none; display: flex; align-items: flex-end; gap: 2px; padding: 6px 8px 0; min-height: 37px; box-sizing: border-box; background: var(--bg-2); box-shadow: inset 0 -1px var(--line); overflow-x: auto; scrollbar-width: none; }
+      .tab { flex: 0 1 200px; min-width: 64px; display: flex; align-items: center; gap: 4px; padding: 4px 4px 5px 12px; border: 1px solid transparent; border-bottom: 0; border-radius: 7px 7px 0 0; color: var(--muted); cursor: pointer; user-select: none; }
+      .tab span { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .tab:hover { background: var(--hover); color: var(--fg); }
+      .tab.active { background: var(--bg); border-color: var(--line); color: var(--fg); }
+      .tab button { border: 0; background: none; padding: 0 5px; border-radius: 4px; line-height: 18px; color: var(--muted); visibility: hidden; }
+      .tab:hover button, .tab.active button { visibility: visible; }
+      .tab button:hover { background: var(--hover); color: var(--fg); }
+      .tab.drop { box-shadow: inset 2px 0 var(--accent); }
+      .tabs .new-tab { align-self: center; flex: none; margin: 0 0 3px 2px; padding: 0 8px; }
       .cm-editor { height: 100%; }
       #app .cm-scroller { font-family: inherit; font-size: 16px; line-height: 1.65; }
       #app .cm-gutters { display: none; }

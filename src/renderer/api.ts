@@ -109,6 +109,7 @@ async function generate(id: string, req: AiRequest): Promise<string | null> {
 const images = {
   generate: (id: string, prompt: string, width: number, height: number, book?: string): Promise<{ name: string } | { error: string }> =>
     invoke('image_generate', { id, prompt, width, height, book }),
+  list: (): Promise<string[]> => invoke('image_list'),
   url: (book: string, name: string) => convertFileSrc(`${book}/${name}`, 'img')
 }
 

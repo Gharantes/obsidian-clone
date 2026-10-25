@@ -3,6 +3,7 @@ import { EditorState, type StateEffect } from '@codemirror/state'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import type { Entry } from './api.ts'
 import { createAi } from './ai.ts'
+import { createAssets } from './assets.ts'
 import { createExplorer, find, movePath, parentOf } from './explorer.ts'
 import { createFolderPage, type FolderPage } from './folderPage.ts'
 import { livePreview } from './livePreview.ts'
@@ -216,11 +217,12 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
 }
 
 const icons = {
+  image: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></svg>',
   folder: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>'
 }
 
-// A view the sidebar can show, picked from the ribbon.
-type Panel = { id: string; title: string; icon: string; el: HTMLElement }
+// A view the sidebar can show, picked from the ribbon. `shown` runs each time it's shown.
+type Panel = { id: string; title: string; icon: string; el: HTMLElement; shown?: () => void }
 
 // The ribbon: a narrow column of buttons, one per sidebar panel. A button shows its panel in the
 // sidebar; clicking the shown panel's button again collapses the sidebar. Remembered per book.
@@ -244,6 +246,7 @@ function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]): HTML
       buttons[i].classList.toggle('on', p.id === id)
     })
     sidebar.hidden = !id
+    panels.find((p) => p.id === id)?.shown?.()
     try {
       localStorage.setItem(key, id ?? '')
     } catch {}
@@ -271,8 +274,10 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
       h('b', { textContent: book.title })
     )
   )
+  const assets = createAssets(book.id)
   const ribbon = createRibbon(nav, book.id, [
-    { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) }
+    { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) },
+    { id: 'assets', title: 'Assets', icon: icons.image, el: assets.el, shown: assets.load }
   ])
   ribbon.append(h('button', { class: 'icon settings', textContent: '⚙', title: 'Settings', onclick: () => openSettings() }))
   root.replaceChildren(ribbon, nav, main)

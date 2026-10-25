@@ -340,6 +340,11 @@ async fn ai_generate(app: AppHandle, window: WebviewWindow, id: String, prompt: 
 // Generates an image into a book (the window's book when `book` is None); resolves to { name } or { error }.
 // Cancelled with ai_cancel, like text.
 #[tauri::command]
+fn image_list(state: AppState, window: WebviewWindow) -> Result<Vec<String>, String> {
+    in_book(&state, &window, images::names)?
+}
+
+#[tauri::command]
 async fn image_generate(app: AppHandle, window: WebviewWindow, id: String, prompt: String, width: u32, height: u32, book: Option<String>) -> Value {
     let cancel = CancellationToken::new();
     let found = {
@@ -414,7 +419,7 @@ fn main() {
             fs_list, fs_read, fs_write, fs_rename, fs_nest, fs_move, fs_remove, fs_create, fs_create_note,
             chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,
-            ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_generate
+            ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_list, image_generate
         ])
         // Serves book images at img://localhost/<book id>%2F<name> (see convertFileSrc in the renderer).
         .register_uri_scheme_protocol("img", |ctx, req| {

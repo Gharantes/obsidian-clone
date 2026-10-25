@@ -31,6 +31,13 @@ pub fn add(db: &Connection, book: &str, name: &str, data: &[u8]) -> Result<(), S
     Ok(())
 }
 
+// The book's image names, in name order.
+pub fn names(db: &Connection, book: &str) -> Result<Vec<String>, String> {
+    let mut stmt = db.prepare("SELECT name FROM images WHERE book = ?1 ORDER BY name COLLATE NOCASE").map_err(err)?;
+    let rows = stmt.query_map([book], |r| r.get(0)).map_err(err)?.collect::<Result<_, _>>().map_err(err);
+    rows
+}
+
 pub fn all(db: &Connection, book: &str) -> Result<Vec<(String, Vec<u8>)>, String> {
     let mut stmt = db.prepare("SELECT name, data FROM images WHERE book = ?1 ORDER BY name").map_err(err)?;
     let rows = stmt.query_map([book], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?.collect::<Result<_, _>>().map_err(err);

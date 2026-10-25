@@ -298,6 +298,7 @@ mod tests {
         assert_eq!((book.title.as_str(), book.color.as_str(), book.notes), ("Old Book", "#123456", 3), "skips other files and dot-files");
         assert_eq!(book.cover.as_deref(), Some("Map.png"));
         assert_eq!(images::get(db, &id, "Map.png").unwrap().as_deref(), Some(&b"\x89PNG"[..]), "images are keyed by file name");
+        assert_eq!(images::names(db, &id).unwrap(), ["Map.png"]);
 
         let zip = dir.with_extension("zip");
         export_zip(db, &id, &zip).unwrap();

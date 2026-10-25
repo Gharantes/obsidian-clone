@@ -74,6 +74,15 @@
       .ribbon .settings { margin-top: auto; }
       .book-view nav { width: 260px; border-right: 1px solid var(--line); overflow: auto; background: var(--bg-2); display: flex; flex-direction: column; }
       .book-view nav .panel { flex: 1; display: flex; flex-direction: column; }
+      .panel-head { padding: 6px 14px 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+      .assets { list-style: none; margin: 0; padding: 0 6px 12px; }
+      .assets li.muted { padding: 4px 8px; font-size: 13px; }
+      .assets button { display: flex; align-items: center; gap: 10px; width: 100%; border: 0; background: none; padding: 4px 8px; text-align: left; }
+      .assets button:hover { background: var(--hover); }
+      .assets img { width: 40px; height: 40px; flex: none; object-fit: cover; border-radius: 4px; background: var(--bg-3); }
+      .assets span { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .dialog.wide { width: auto; max-width: 90vw; max-height: 88vh; }
+      .asset-preview { max-width: 100%; max-height: 70vh; object-fit: contain; border-radius: 6px; }
       .book-head { display: flex; align-items: center; gap: 4px; padding: 10px 8px 4px; }
       .book-head b { font-size: 15px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .book-view .actions { display: flex; gap: 6px; padding: 6px 10px 8px; }

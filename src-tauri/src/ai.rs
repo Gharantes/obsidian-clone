@@ -93,12 +93,16 @@ pub fn parse_claude_line(line: &str) -> ClaudeEvent {
 }
 
 // Runs Claude Code headless with no tools, feeding the prompt on stdin and streaming the reply.
-async fn claude_code(path: &Path, model: &str, workdir: &Path, prompt: &str, system: &str, on_text: &mut (dyn FnMut(&str) + Send), cancel: &CancellationToken) -> Result<(), String> {
+#[allow(clippy::too_many_arguments)]
+async fn claude_code(path: &Path, model: &str, effort: &str, workdir: &Path, prompt: &str, system: &str, on_text: &mut (dyn FnMut(&str) + Send), cancel: &CancellationToken) -> Result<(), String> {
     std::fs::create_dir_all(workdir).map_err(|e| e.to_string())?;
     let mut cmd = command(path);
     cmd.args(["-p", "--output-format", "stream-json", "--verbose", "--include-partial-messages", "--tools", "", "--setting-sources", "", "--strict-mcp-config", "--no-session-persistence", "--system-prompt", system]);
     if !model.is_empty() {
         cmd.args(["--model", model]);
+    }
+    if !effort.is_empty() {
+        cmd.args(["--effort", effort]);
     }
     cmd.current_dir(workdir).env_remove("CLAUDECODE").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     let mut child = cmd.spawn().map_err(|e| format!("Could not start Claude Code ({}): {e}", path.display()))?;
@@ -238,7 +242,7 @@ pub async fn generate(ai: &Ai, home: &Path, workdir: &Path, prompt: &str, system
             format!("Claude Code not found at {}", ai.claude_path)
         });
     };
-    claude_code(&path, &ai.claude_model, workdir, prompt, system, on_text, cancel).await
+    claude_code(&path, &ai.claude_model, &ai.claude_effort, workdir, prompt, system, on_text, cancel).await
 }
 
 #[cfg(test)]

@@ -17,6 +17,8 @@ export type Settings = {
     claudePath: string
     // Model alias or full id passed to `claude --model`; empty uses Claude Code's default.
     claudeModel: string
+    // `claude --effort` (low … max); empty uses Claude Code's default.
+    claudeEffort: string
     // Any OpenAI-compatible /chat/completions endpoint (Ollama, Groq, OpenRouter, Gemini, ...).
     openai: { baseUrl: string; model: string; apiKey: string }
   }

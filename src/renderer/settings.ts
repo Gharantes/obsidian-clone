@@ -23,6 +23,48 @@ const SOURCES = {
   image: { pollinations: 'Pollinations', openai: 'OpenAI-compatible' }
 }
 
+// `claude --model` aliases (each is the latest version) and `--effort` levels; '' is Claude Code's default.
+const CLAUDE_MODELS = { '': 'Default model', fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' }
+const EFFORTS = { '': 'Default effort', low: 'Low effort', medium: 'Medium effort', high: 'High effort', xhigh: 'Extra high effort', max: 'Max effort' }
+const MODEL_TITLE = 'Claude model, always its latest version'
+const EFFORT_TITLE = 'How hard Claude thinks: more is slower and uses more of your plan, but writes better'
+
+// A value not in the list, like a full model id, is kept as its own option.
+function setValue(sel: HTMLSelectElement, value: string) {
+  if (![...sel.options].some((o) => o.value === value)) sel.append(h('option', { value, textContent: value }))
+  sel.value = value
+}
+function select(options: Record<string, string>, value: string, title = '') {
+  const sel = h('select', { title }, ...Object.entries(options).map(([value, textContent]) => h('option', { value, textContent })))
+  setValue(sel, value)
+  return sel
+}
+
+// Sidebar dropdowns for where text is generated and, with Claude Code, the model and effort.
+// Changes are saved to settings; they re-read settings on focus so the Settings dialog's changes show up.
+export function textPickers(): HTMLSelectElement[] {
+  const source = select(SOURCES.ai, 'claude-code', 'Where text is generated')
+  const model = select(CLAUDE_MODELS, '', MODEL_TITLE)
+  const effort = select(EFFORTS, '', EFFORT_TITLE)
+  const fields = [[source, 'provider'], [model, 'claudeModel'], [effort, 'claudeEffort']] as const
+  const sync = () => (model.hidden = effort.hidden = source.value !== 'claude-code')
+  const load = async () => {
+    const s = await api.settings.get()
+    for (const [sel, key] of fields) setValue(sel, s.ai[key])
+    sync()
+  }
+  for (const [sel, key] of fields) {
+    sel.onfocus = load
+    sel.onchange = async () => {
+      sync()
+      const s = await api.settings.get()
+      await api.settings.set({ ...s, ai: { ...s.ai, [key]: sel.value } })
+    }
+  }
+  load()
+  return [source, model, effort]
+}
+
 // Compact provider dropdown; changing it saves the choice to settings.
 export function sourcePicker(kind: keyof typeof SOURCES): HTMLSelectElement {
   const sel = h('select', { title: kind === 'ai' ? 'Where text is generated' : 'Where images are generated' },
@@ -47,12 +89,12 @@ export async function openSettings(): Promise<void> {
 
   const claudePath = h('input', { value: s.ai.claudePath, placeholder: 'Detecting…' })
   api.ai.detectClaude().then((p) => (claudePath.placeholder = p ? `Auto-detect: ${p}` : 'Not found — install Claude Code or enter its path'))
-  const models = h('datalist', { id: 'claude-models' }, ...['sonnet', 'opus', 'haiku'].map((m) => h('option', { value: m })))
-  const claudeModel = h('input', { value: s.ai.claudeModel, placeholder: 'Claude Code default' })
-  claudeModel.setAttribute('list', 'claude-models')
+  const claudeModel = select(CLAUDE_MODELS, s.ai.claudeModel, MODEL_TITLE)
+  const claudeEffort = select(EFFORTS, s.ai.claudeEffort, EFFORT_TITLE)
   const claude = h('fieldset', {},
     field('Executable', claudePath),
-    field('Model', claudeModel, models),
+    field('Model', claudeModel),
+    field('Effort', claudeEffort),
     h('p', { class: 'hint', textContent: 'Runs `claude -p` with no tools. Log in once by running `claude` in a terminal.' })
   )
 
@@ -99,7 +141,8 @@ export async function openSettings(): Promise<void> {
     ai: {
       provider: provider.value as Settings['ai']['provider'],
       claudePath: claudePath.value.trim(),
-      claudeModel: claudeModel.value.trim(),
+      claudeModel: claudeModel.value,
+      claudeEffort: claudeEffort.value,
       openai: { baseUrl: baseUrl.value.trim(), model: model.value.trim(), apiKey: apiKey.value.trim() }
     },
     image: {

@@ -19,6 +19,8 @@ pub struct Ai {
     pub claude_path: String,
     // Model alias or full id passed to `claude --model`; empty uses Claude Code's default.
     pub claude_model: String,
+    // `claude --effort`: low, medium, high, xhigh or max; empty uses Claude Code's default.
+    pub claude_effort: String,
     // Any OpenAI-compatible /chat/completions endpoint (Ollama, Groq, OpenRouter, Gemini, ...).
     pub openai: OpenAi,
 }
@@ -48,7 +50,7 @@ impl Default for Image {
 
 impl Default for Ai {
     fn default() -> Self {
-        Ai { provider: "claude-code".into(), claude_path: String::new(), claude_model: "sonnet".into(), openai: OpenAi::default() }
+        Ai { provider: "claude-code".into(), claude_path: String::new(), claude_model: "sonnet".into(), claude_effort: String::new(), openai: OpenAi::default() }
     }
 }
 

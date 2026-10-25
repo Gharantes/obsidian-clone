@@ -1,7 +1,7 @@
 import { StateEffect, StateField, type Text } from '@codemirror/state'
 import { Decoration, EditorView, keymap, type DecorationSet } from '@codemirror/view'
 import { parseReply, placeEdits, type Edit, type Turn } from './prompt.ts'
-import { sourcePicker } from './settings.ts'
+import { sourcePicker, textPickers } from './settings.ts'
 import { ago, h } from './ui.ts'
 
 // Text the AI just wrote stays highlighted until the next edit.
@@ -41,14 +41,14 @@ export function createAi(view: EditorView, getPath: () => string | null) {
   const past = h('button', { class: 'icon', textContent: 'History', title: 'Reopen a previous chat', onclick: () => (list.hidden ? showList() : hideList()) })
   const list = h('div', { class: 'chats', hidden: true })
   const grip = h('div', { class: 'grip', title: 'Drag to resize' })
-  const label = (text: string, control: HTMLElement) => h('label', {}, h('span', { textContent: text }), control)
+  const label = (text: string, ...controls: HTMLElement[]) => h('label', {}, h('span', { textContent: text }), ...controls)
   const panel = h('aside', { class: 'ai-panel', hidden: true },
     grip,
     h('header', {}, h('span', { class: 'spark', textContent: '✨' }), h('b', { textContent: 'AI' }), past, clear, close),
     log,
     list,
     input,
-    h('footer', {}, label('Text', sourcePicker('ai')), label('Images', sourcePicker('image')), stop, send)
+    h('footer', {}, label('Text', ...textPickers()), label('Images', sourcePicker('image')), stop, send)
   )
   resizable(panel, grip)
 

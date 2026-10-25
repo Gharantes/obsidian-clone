@@ -9,24 +9,25 @@ export type Entry = { path: string; name: string; folder: boolean; note?: string
 // `cover` is the name of the book's cover image, if it has one.
 export type Book = { id: string; ts: number; title: string; notes: number; color: string; cover: string | null }
 
-export type Provider = 'claude-code' | 'openai'
+export type ApiConfig = { baseUrl: string; model: string; apiKey: string }
 
 export type Settings = {
   ai: {
-    provider: Provider
+    // 'claude-code' or a key of `apis`.
+    provider: string
     // Claude Code executable; empty means auto-detect.
     claudePath: string
     // Model alias or full id passed to `claude --model`; empty uses Claude Code's default.
     claudeModel: string
     // `claude --effort` (low … max); empty uses Claude Code's default.
     claudeEffort: string
-    // Any OpenAI-compatible /chat/completions endpoint (Ollama, Groq, OpenRouter, Gemini, ...).
-    openai: { baseUrl: string; model: string; apiKey: string }
+    // OpenAI-compatible /chat/completions APIs by provider id (see APIS in settings.ts).
+    apis: Record<string, ApiConfig>
   }
   image: {
     // Pollinations is free with no key; "openai" is any /images/generations server (stable-diffusion.cpp, LocalAI, ...).
     provider: 'pollinations' | 'openai'
-    openai: { baseUrl: string; model: string; apiKey: string }
+    openai: ApiConfig
   }
 }
 
@@ -125,7 +126,8 @@ export const api = {
     cancel: (id: string): Promise<void> => invoke('ai_cancel', { id }),
     onChunk: (cb: (id: string, text: string) => void) => on('ai-chunk', ([id, text]) => cb(id, text)),
     detectClaude: (): Promise<string | null> => invoke('ai_detect_claude'),
-    test: (): Promise<{ text: string } | { error: string }> => invoke('ai_test', { system: SYSTEM })
+    // Tests a provider (the selected one by default) with the saved settings.
+    test: (provider?: string): Promise<{ text: string } | { error: string }> => invoke('ai_test', { system: SYSTEM, provider })
   }
 }
 

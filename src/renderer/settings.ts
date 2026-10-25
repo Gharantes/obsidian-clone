@@ -1,27 +1,32 @@
-import type { Settings } from './api.ts'
+import type { ApiConfig, Settings } from './api.ts'
 import { parseReply } from './prompt.ts'
 import { h, modal } from './ui.ts'
 
 const { api } = window
 
-// OpenAI-compatible endpoints with a free tier or local models (see FREE_AI_OPTIONS.md).
-export const PRESETS: { name: string; baseUrl: string; model: string; key: string }[] = [
-  { name: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', model: 'llama3.2', key: 'not needed' },
-  { name: 'LM Studio (local)', baseUrl: 'http://localhost:1234/v1', model: 'local-model', key: 'not needed' },
-  { name: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-3.8-flash', key: 'aistudio.google.com/apikey' },
-  { name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', key: 'console.groq.com/keys' },
-  { name: 'OpenRouter (free models)', baseUrl: 'https://openrouter.ai/api/v1', model: 'openrouter/free', key: 'openrouter.ai/keys' },
-  { name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', model: 'mistral-small-latest', key: 'console.mistral.ai' },
-  { name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', model: 'gpt-oss-120b', key: 'cloud.cerebras.ai' },
-  { name: 'GitHub Models', baseUrl: 'https://models.github.ai/inference', model: 'openai/gpt-4.1-mini', key: 'a GitHub token with models:read' }
+// OpenAI-compatible APIs, each with its own section in Settings (see FREE_AI_OPTIONS.md).
+// `local` ones (and the custom server) take a base URL; the rest only need a key.
+type ApiInfo = { id: string; name: string; baseUrl: string; model: string; key: string; local?: boolean }
+export const APIS: ApiInfo[] = [
+  { id: 'gemini', name: 'Google Gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-3.8-flash', key: 'aistudio.google.com/apikey' },
+  { id: 'xai', name: 'xAI Grok', baseUrl: 'https://api.x.ai/v1', model: 'grok-4', key: 'console.x.ai' },
+  { id: 'groq', name: 'Groq', baseUrl: 'https://api.groq.com/openai/v1', model: 'openai/gpt-oss-120b', key: 'console.groq.com/keys' },
+  { id: 'openrouter', name: 'OpenRouter', baseUrl: 'https://openrouter.ai/api/v1', model: 'openrouter/free', key: 'openrouter.ai/keys' },
+  { id: 'mistral', name: 'Mistral', baseUrl: 'https://api.mistral.ai/v1', model: 'mistral-small-latest', key: 'console.mistral.ai' },
+  { id: 'cerebras', name: 'Cerebras', baseUrl: 'https://api.cerebras.ai/v1', model: 'gpt-oss-120b', key: 'cloud.cerebras.ai' },
+  { id: 'github', name: 'GitHub Models', baseUrl: 'https://models.github.ai/inference', model: 'openai/gpt-4.1-mini', key: 'a GitHub token with models:read' },
+  { id: 'ollama', name: 'Ollama (local)', baseUrl: 'http://localhost:11434/v1', model: 'llama3.2', key: '', local: true },
+  { id: 'lmstudio', name: 'LM Studio (local)', baseUrl: 'http://localhost:1234/v1', model: 'local-model', key: '', local: true },
+  { id: 'openai', name: 'Other OpenAI-compatible server', baseUrl: 'http://localhost:8080/v1', model: '', key: '', local: true }
 ]
+
+// A provider's saved settings over its defaults.
+const apiOf = (ai: Settings['ai'], a: ApiInfo) => ({ baseUrl: a.baseUrl, model: a.model, apiKey: '', ...(ai.apis[a.id] as ApiConfig | undefined) })
 
 const field = (label: string, ...control: (Node | string)[]) => h('label', { class: 'field' }, h('span', { textContent: label }), ...control)
 
-const SOURCES = {
-  ai: { 'claude-code': 'Claude Code', openai: 'OpenAI-compatible' },
-  image: { pollinations: 'Pollinations', openai: 'OpenAI-compatible' }
-}
+const AI_SOURCES = { 'claude-code': 'Claude Code', ...Object.fromEntries(APIS.map((a) => [a.id, a.name])) }
+const IMAGE_SOURCES = { pollinations: 'Pollinations', openai: 'OpenAI-compatible' }
 
 // `claude --model` aliases (each is the latest version) and `--effort` levels; '' is Claude Code's default.
 const CLAUDE_MODELS = { '': 'Default model', fable: 'Fable', opus: 'Opus', sonnet: 'Sonnet', haiku: 'Haiku' }
@@ -40,142 +45,149 @@ function select(options: Record<string, string>, value: string, title = '') {
   return sel
 }
 
-// Sidebar dropdowns for where text is generated and, with Claude Code, the model and effort.
+// Sidebar pickers for where text is generated and its model (and, with Claude Code, effort).
 // Changes are saved to settings; they re-read settings on focus so the Settings dialog's changes show up.
-export function textPickers(): HTMLSelectElement[] {
-  const source = select(SOURCES.ai, 'claude-code', 'Where text is generated')
+export function textPickers(): HTMLElement[] {
+  const source = select(AI_SOURCES, 'claude-code', 'Where text is generated')
   const model = select(CLAUDE_MODELS, '', MODEL_TITLE)
   const effort = select(EFFORTS, '', EFFORT_TITLE)
-  const fields = [[source, 'provider'], [model, 'claudeModel'], [effort, 'claudeEffort']] as const
-  const sync = () => (model.hidden = effort.hidden = source.value !== 'claude-code')
-  const load = async () => {
-    const s = await api.settings.get()
-    for (const [sel, key] of fields) setValue(sel, s.ai[key])
-    sync()
-  }
-  for (const [sel, key] of fields) {
-    sel.onfocus = load
-    sel.onchange = async () => {
-      sync()
-      const s = await api.settings.get()
-      await api.settings.set({ ...s, ai: { ...s.ai, [key]: sel.value } })
+  const apiModel = h('input', { class: 'model', title: 'Model id', spellcheck: false })
+  const current = () => APIS.find((a) => a.id === source.value)
+  const sync = (s: Settings) => {
+    const a = current()
+    model.hidden = effort.hidden = !!a
+    apiModel.hidden = !a
+    if (a) {
+      apiModel.value = apiOf(s.ai, a).model
+      apiModel.placeholder = a.model || 'Model id'
     }
   }
+  const load = async () => {
+    const s = await api.settings.get()
+    setValue(source, s.ai.provider)
+    setValue(model, s.ai.claudeModel)
+    setValue(effort, s.ai.claudeEffort)
+    sync(s)
+  }
+  const save = async (change: (ai: Settings['ai']) => Partial<Settings['ai']>) => {
+    const s = await api.settings.get()
+    return api.settings.set({ ...s, ai: { ...s.ai, ...change(s.ai) } })
+  }
+  for (const el of [source, model, effort, apiModel]) el.onfocus = load
+  // Picking an API saves its defaults too, so it works without opening Settings (local servers need no key).
+  source.onchange = async () => {
+    const a = current()
+    sync(await save((ai) => ({ provider: source.value, apis: a ? { ...ai.apis, [a.id]: apiOf(ai, a) } : ai.apis })))
+  }
+  model.onchange = () => save(() => ({ claudeModel: model.value }))
+  effort.onchange = () => save(() => ({ claudeEffort: effort.value }))
+  apiModel.onchange = () => {
+    const a = current()
+    if (a) save((ai) => ({ apis: { ...ai.apis, [a.id]: { ...apiOf(ai, a), model: apiModel.value.trim() } } }))
+  }
   load()
-  return [source, model, effort]
+  return [source, model, effort, apiModel]
 }
 
-// Compact provider dropdown; changing it saves the choice to settings.
-export function sourcePicker(kind: keyof typeof SOURCES): HTMLSelectElement {
-  const sel = h('select', { title: kind === 'ai' ? 'Where text is generated' : 'Where images are generated' },
-    ...Object.entries(SOURCES[kind]).map(([value, textContent]) => h('option', { value, textContent })))
+// Compact image provider dropdown; changing it saves the choice to settings.
+export function imagePicker(): HTMLSelectElement {
+  const sel = select(IMAGE_SOURCES, 'pollinations', 'Where images are generated')
   // Re-read on focus so changes made in the Settings dialog show up.
-  const load = () => api.settings.get().then((s) => (sel.value = s[kind].provider))
+  const load = () => api.settings.get().then((s) => (sel.value = s.image.provider))
   sel.onfocus = load
   sel.onchange = async () => {
     const s = await api.settings.get()
-    await api.settings.set({ ...s, [kind]: { ...s[kind], provider: sel.value } })
+    await api.settings.set({ ...s, image: { ...s.image, provider: sel.value as Settings['image']['provider'] } })
   }
   load()
   return sel
 }
 
-// Settings dialog: the AI writing and image providers.
+// A collapsible provider section, open when it's the one in use.
+const section = (name: string, open: boolean, ...body: Node[]) =>
+  h('details', { class: 'provider', open }, h('summary', { textContent: name }), h('fieldset', {}, ...body))
+
+// Settings dialog: one section per provider with how to reach it (executable, API key, server URL).
+// Which provider and model to use is picked in the AI sidebar.
 export async function openSettings(): Promise<void> {
   let s: Settings = await api.settings.get()
 
-  const provider = h('select', {}, h('option', { value: 'claude-code', textContent: 'Claude Code (uses your Claude subscription)' }), h('option', { value: 'openai', textContent: 'OpenAI-compatible API (Ollama, Gemini, Groq, …)' }))
-  provider.value = s.ai.provider
+  // A Test button that saves, then sends a tiny prompt to `provider`.
+  const tester = (provider: string) => {
+    const result = h('p', { class: 'hint' })
+    const test = h('button', {
+      textContent: 'Test',
+      onclick: async () => {
+        s = await api.settings.set(collect())
+        result.className = 'hint'
+        result.textContent = 'Testing…'
+        test.disabled = true
+        const r = await api.ai.test(provider)
+        test.disabled = false
+        result.className = 'error' in r ? 'error' : 'hint ok'
+        result.textContent = 'error' in r ? r.error : `✓ ${parseReply(r.text).reply}`
+      }
+    })
+    return h('div', { class: 'row-input' }, test, result)
+  }
 
   const claudePath = h('input', { value: s.ai.claudePath, placeholder: 'Detecting…' })
   api.ai.detectClaude().then((p) => (claudePath.placeholder = p ? `Auto-detect: ${p}` : 'Not found — install Claude Code or enter its path'))
-  const claudeModel = select(CLAUDE_MODELS, s.ai.claudeModel, MODEL_TITLE)
-  const claudeEffort = select(EFFORTS, s.ai.claudeEffort, EFFORT_TITLE)
-  const claude = h('fieldset', {},
+  const claude = section('Claude Code', s.ai.provider === 'claude-code',
     field('Executable', claudePath),
-    field('Model', claudeModel),
-    field('Effort', claudeEffort),
-    h('p', { class: 'hint', textContent: 'Runs `claude -p` with no tools. Log in once by running `claude` in a terminal.' })
+    h('p', { class: 'hint', textContent: 'Uses your Claude subscription: runs `claude -p` with no tools. Log in once by running `claude` in a terminal.' }),
+    tester('claude-code')
   )
 
-  const preset = h('select', {}, h('option', { value: '', textContent: 'Fill in from a preset…' }), ...PRESETS.map((p, i) => h('option', { value: String(i), textContent: p.name })))
-  const baseUrl = h('input', { value: s.ai.openai.baseUrl })
-  const model = h('input', { value: s.ai.openai.model })
-  const apiKey = h('input', { type: 'password', value: s.ai.openai.apiKey, placeholder: 'Leave empty for local servers' })
-  const keyHint = h('p', { class: 'hint' })
-  preset.onchange = () => {
-    const p = PRESETS[Number(preset.value)]
-    if (!p) return
-    baseUrl.value = p.baseUrl
-    model.value = p.model
-    keyHint.textContent = `API key: ${p.key}`
-  }
-  const openai = h('fieldset', {}, field('Preset', preset), field('Base URL', baseUrl), field('Model', model), field('API key', apiKey), keyHint)
+  const apis = APIS.map((a) => {
+    const cfg = apiOf(s.ai, a)
+    const baseUrl = h('input', { value: cfg.baseUrl, placeholder: a.baseUrl })
+    const apiKey = h('input', { type: 'password', value: cfg.apiKey, placeholder: a.local ? 'Leave empty for local servers' : 'Paste your API key' })
+    const el = section(a.name, s.ai.provider === a.id,
+      ...(a.local ? [field('Base URL', baseUrl)] : []),
+      field('API key', apiKey),
+      ...(a.key ? [h('p', { class: 'hint', textContent: `Get a key at ${a.key}` })] : []),
+      tester(a.id)
+    )
+    const value = () => ({ ...cfg, baseUrl: (a.local && baseUrl.value.trim()) || a.baseUrl, apiKey: apiKey.value.trim() })
+    return { id: a.id, el, value }
+  })
 
-  const imageProvider = h('select', {},
-    h('option', { value: 'pollinations', textContent: 'Pollinations (free, no key, small watermark)' }),
-    h('option', { value: 'openai', textContent: 'OpenAI-compatible server (stable-diffusion.cpp, LocalAI, …)' })
-  )
-  imageProvider.value = s.image.provider
   const imageUrl = h('input', { value: s.image.openai.baseUrl })
   const imageModel = h('input', { value: s.image.openai.model, placeholder: "Server's default" })
   const imageKey = h('input', { type: 'password', value: s.image.openai.apiKey, placeholder: 'Leave empty for local servers' })
-  const imageOpenai = h('fieldset', {},
+  const pollinations = section('Pollinations', s.image.provider === 'pollinations',
+    h('p', { class: 'hint', textContent: 'Free, with no key or setup. Images get a small watermark.' })
+  )
+  const imageOpenai = section('OpenAI-compatible image server', s.image.provider === 'openai',
     field('Base URL', imageUrl),
     field('Model', imageModel),
     field('API key', imageKey),
     h('p', { class: 'hint', textContent: 'Calls POST <base URL>/images/generations, e.g. `sd-server --listen-port 8080` from stable-diffusion.cpp.' })
   )
 
-  const sync = () => {
-    claude.hidden = provider.value !== 'claude-code'
-    openai.hidden = provider.value !== 'openai'
-    imageOpenai.hidden = imageProvider.value !== 'openai'
-  }
-  provider.onchange = sync
-  imageProvider.onchange = sync
-  sync()
-
   const collect = (): Settings => ({
     ...s,
     ai: {
-      provider: provider.value as Settings['ai']['provider'],
+      ...s.ai,
       claudePath: claudePath.value.trim(),
-      claudeModel: claudeModel.value,
-      claudeEffort: claudeEffort.value,
-      openai: { baseUrl: baseUrl.value.trim(), model: model.value.trim(), apiKey: apiKey.value.trim() }
+      apis: { ...s.ai.apis, ...Object.fromEntries(apis.map((x) => [x.id, x.value()])) }
     },
     image: {
-      provider: imageProvider.value as Settings['image']['provider'],
+      ...s.image,
       openai: { baseUrl: imageUrl.value.trim(), model: imageModel.value.trim(), apiKey: imageKey.value.trim() }
-    }
-  })
-
-  const result = h('p', { class: 'hint' })
-  const test = h('button', {
-    textContent: 'Test',
-    onclick: async () => {
-      s = await api.settings.set(collect())
-      result.className = 'hint'
-      result.textContent = 'Testing…'
-      test.disabled = true
-      const r = await api.ai.test()
-      test.disabled = false
-      result.className = 'error' in r ? 'error' : 'hint ok'
-      result.textContent = 'error' in r ? r.error : `✓ ${parseReply(r.text).reply}`
     }
   })
 
   const dlg = modal(
     'Settings',
     [
+      h('p', { class: 'hint', textContent: 'Choose which provider and model to use in the AI sidebar.' }),
       h('h3', { textContent: 'AI writing' }),
-      field('Provider', provider),
       claude,
-      openai,
-      h('div', { class: 'row-input' }, test, result),
+      ...apis.map((x) => x.el),
       h('h3', { textContent: 'Images' }),
-      field('Provider', imageProvider),
+      pollinations,
       imageOpenai
     ],
     [

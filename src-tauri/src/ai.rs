@@ -232,8 +232,11 @@ async fn openai_compatible(cfg: &OpenAi, prompt: &str, system: &str, on_text: &m
 
 // Generates with the configured provider, calling on_text for each piece of the reply.
 pub async fn generate(ai: &Ai, home: &Path, workdir: &Path, prompt: &str, system: &str, on_text: &mut (dyn FnMut(&str) + Send), cancel: &CancellationToken) -> Result<(), String> {
-    if ai.provider == "openai" {
-        return openai_compatible(&ai.openai, prompt, system, on_text, cancel).await;
+    if ai.provider != "claude-code" {
+        return match ai.apis.get(&ai.provider).filter(|c| !c.base_url.is_empty()) {
+            Some(cfg) => openai_compatible(cfg, prompt, system, on_text, cancel).await,
+            None => Err("This provider isn't set up yet. Add it in Settings.".into()),
+        };
     }
     let Some(path) = find_claude(&ai.claude_path, home).await else {
         return Err(if ai.claude_path.is_empty() {

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
 
@@ -13,7 +14,7 @@ pub struct Settings {
 #[derive(Serialize, Deserialize, Clone)]
 #[serde(default, rename_all = "camelCase")]
 pub struct Ai {
-    // "claude-code" or "openai".
+    // "claude-code" or a key of `apis`.
     pub provider: String,
     // Claude Code executable; empty means auto-detect.
     pub claude_path: String,
@@ -21,11 +22,15 @@ pub struct Ai {
     pub claude_model: String,
     // `claude --effort`: low, medium, high, xhigh or max; empty uses Claude Code's default.
     pub claude_effort: String,
-    // Any OpenAI-compatible /chat/completions endpoint (Ollama, Groq, OpenRouter, Gemini, ...).
-    pub openai: OpenAi,
+    // OpenAI-compatible /chat/completions APIs by provider id (gemini, groq, ollama, ...);
+    // "openai" is a custom server. The renderer fills in each one's base URL.
+    pub apis: BTreeMap<String, OpenAi>,
+    // The single API of older settings; moved to apis["openai"] on load.
+    #[serde(skip_serializing)]
+    pub openai: Option<OpenAi>,
 }
 
-#[derive(Serialize, Deserialize, Clone)]
+#[derive(Serialize, Deserialize, Clone, Default)]
 #[serde(default, rename_all = "camelCase")]
 pub struct OpenAi {
     pub base_url: String,
@@ -50,19 +55,17 @@ impl Default for Image {
 
 impl Default for Ai {
     fn default() -> Self {
-        Ai { provider: "claude-code".into(), claude_path: String::new(), claude_model: "sonnet".into(), claude_effort: String::new(), openai: OpenAi::default() }
-    }
-}
-
-impl Default for OpenAi {
-    fn default() -> Self {
-        OpenAi { base_url: "http://localhost:11434/v1".into(), model: "llama3.2".into(), api_key: String::new() }
+        Ai { provider: "claude-code".into(), claude_path: String::new(), claude_model: "sonnet".into(), claude_effort: String::new(), apis: BTreeMap::new(), openai: None }
     }
 }
 
 // Reads settings over the defaults; a missing or broken file means defaults.
 pub fn load_settings(file: &Path) -> Settings {
-    fs::read_to_string(file).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    let mut s: Settings = fs::read_to_string(file).ok().and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
+    if let Some(old) = s.ai.openai.take() {
+        s.ai.apis.entry("openai".into()).or_insert(old);
+    }
+    s
 }
 
 pub fn save_settings(file: &Path, s: &Settings) -> std::io::Result<()> {

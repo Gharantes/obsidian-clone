@@ -1,5 +1,5 @@
 import type { Book } from './api.ts'
-import { openSettings, sourcePicker } from './settings.ts'
+import { openSettings, imagePicker } from './settings.ts'
 import { ago, ask, h, modal, showMenu } from './ui.ts'
 
 const { api } = window
@@ -59,7 +59,7 @@ function generateCover(b: Book): Promise<void> {
   return new Promise((resolve) => {
     const job = crypto.randomUUID()
     const input = h('input', { value: `Book cover illustration for "${b.title}", no text` })
-    const source = sourcePicker('image')
+    const source = imagePicker()
     const status = h('p', { class: 'hint', textContent: 'Takes about 10 seconds.' })
     const draw = async () => {
       if (!input.value.trim()) return input.focus()

@@ -5,15 +5,18 @@ check the provider's own limits page before relying on any number here.
 
 ## How the app plugs into these
 
-The app has two AI providers (Settings → AI writing):
+Each provider has its own section in Settings, which holds how to reach it (the Claude Code
+executable, an API key, a local server's URL). Which provider and model to use is picked in the
+AI sidebar.
 
 1. **Claude Code**: the default. It runs `claude -p` headless with no tools, so it uses your
    Claude subscription and needs no API key. It's not free, but it costs nothing extra if you
-   already pay for Claude. It's implemented in `src/main/ai.ts` (`claudeCode`).
+   already pay for Claude. It's implemented in `src-tauri/src/ai.rs` (`claude_code`).
 2. **OpenAI-compatible API**: any server with a `/chat/completions` endpoint. Almost every
-   option below speaks this protocol, so trying one is just: pick the preset (or type the base
-   URL), set the model, paste a key, press **Test**. It's implemented in `src/main/ai.ts`
-   (`openaiCompatible`); the presets are in `src/renderer/settings.ts`.
+   option below speaks this protocol, so trying one is just: paste a key in its section, press
+   **Test**, then pick it and its model in the sidebar. Servers without a section go under
+   "Other OpenAI-compatible server". It's implemented in `src-tauri/src/ai.rs`
+   (`openai_compatible`); the list of providers (`APIS`) is in `src/renderer/settings.ts`.
 
 Anything that is *not* OpenAI-compatible would need a new provider function next to those two.
 

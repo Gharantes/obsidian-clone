@@ -287,7 +287,8 @@ const MASK: &str = "••••••••";
 // The renderer never sees the stored API keys, only whether there are any.
 fn public_settings(st: &App) -> Settings {
     let mut s = st.settings.clone();
-    for key in [&mut s.ai.openai.api_key, &mut s.image.openai.api_key] {
+    let keys = s.ai.apis.values_mut().map(|a| &mut a.api_key).chain([&mut s.image.openai.api_key]);
+    for key in keys {
         if !key.is_empty() {
             *key = MASK.into();
         }
@@ -304,8 +305,8 @@ fn settings_get(state: AppState) -> Settings {
 fn settings_set(state: AppState, s: Settings) -> Settings {
     let mut st = state.lock().unwrap();
     let mut s = s;
-    if s.ai.openai.api_key == MASK {
-        s.ai.openai.api_key = st.settings.ai.openai.api_key.clone();
+    for (id, a) in s.ai.apis.iter_mut().filter(|(_, a)| a.api_key == MASK) {
+        a.api_key = st.settings.ai.apis.get(id).map(|o| o.api_key.clone()).unwrap_or_default();
     }
     if s.image.openai.api_key == MASK {
         s.image.openai.api_key = st.settings.image.openai.api_key.clone();
@@ -374,14 +375,18 @@ async fn ai_detect_claude(app: AppHandle) -> Option<String> {
     ai::find_claude("", &home).await.map(|p| p.to_string_lossy().into_owned())
 }
 
-// Sends a tiny prompt with the current settings; resolves to { text } or { error }.
+// Sends a tiny prompt to a provider (the selected one when None) with the saved settings;
+// resolves to { text } or { error }.
 #[tauri::command]
-async fn ai_test(app: AppHandle, system: String) -> Value {
-    let (ai, home, workdir) = {
+async fn ai_test(app: AppHandle, system: String, provider: Option<String>) -> Value {
+    let (mut ai, home, workdir) = {
         let state = app.state::<Mutex<App>>();
         let st = state.lock().unwrap();
         (st.settings.ai.clone(), st.home.clone(), st.dir.join("ai-workdir"))
     };
+    if let Some(p) = provider {
+        ai.provider = p;
+    }
     let mut text = String::new();
     let mut on_text = |t: &str| text.push_str(t);
     let prompt = "Reply with exactly: Hello from your AI provider!";

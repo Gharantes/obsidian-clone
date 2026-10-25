@@ -21,7 +21,10 @@ A clone of [Obsidian](https://obsidian.md), the Markdown knowledge base app, sha
 
 - **Claude Code** (default): uses your Claude subscription through `claude -p`, no API key. Install Claude Code and run
   `claude` once to log in. The app finds it on PATH, in `~/.local/bin`, or bundled with the VS Code extension.
-- **OpenAI-compatible API**: Ollama, LM Studio, Gemini, Groq, OpenRouter… see [FREE_AI_OPTIONS.md](FREE_AI_OPTIONS.md).
+- **OpenAI-compatible APIs**: Gemini, xAI Grok, Groq, OpenRouter, Ollama, LM Studio… each has its own section in
+  Settings for its API key (or server URL). See [FREE_AI_OPTIONS.md](FREE_AI_OPTIONS.md).
+
+Pick the provider and model in the AI sidebar; Settings only holds how to reach each one.
 
 ## Develop
 

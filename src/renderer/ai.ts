@@ -4,7 +4,7 @@ import type { Entry } from './api.ts'
 import { find } from './explorer.ts'
 import { CHANGE, endSeparator, notePaths, noteName, parseReply, placeEdits, type Edit, type Turn } from './prompt.ts'
 import { isFolderNote } from './sections.ts'
-import { sourcePicker, textPickers } from './settings.ts'
+import { imagePicker, textPickers } from './settings.ts'
 import { ago, h } from './ui.ts'
 
 // Text the AI just wrote stays highlighted until the next edit.
@@ -78,7 +78,7 @@ export function createAi(o: Hooks) {
     list,
     suggest,
     input,
-    h('footer', {}, label('Text', ...textPickers()), label('Images', sourcePicker('image')), stop, send)
+    h('footer', {}, label('Text', ...textPickers()), label('Images', imagePicker()), stop, send)
   )
   resizable(panel, grip)
 

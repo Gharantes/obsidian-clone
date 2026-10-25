@@ -38,25 +38,24 @@ window.api.ai.onChunk((id, text) => listeners.get(id)?.(text))
 
 type State = 'idle' | 'running' | 'review'
 
-// AI sidebar for the editor (Ctrl/Cmd+J): write at the cursor, continue the note, or rewrite
-// the selection. Drag its left edge to resize it. Text streams into the note, then Keep (one undo step) or Discard.
+// AI sidebar for the editor (Ctrl/Cmd+J). Drag its left edge to resize it. One button writes text:
+// it rewrites the selection, writes what the prompt asks at the cursor, or with an empty prompt
+// continues the note. Text streams into the note, then Keep (one undo step) or Discard.
 // Image draws the typed description and embeds it at the cursor as ![[name]].
 export function createAi(view: EditorView, getPath: () => string | null) {
   let state: State = 'idle'
   let job: string | null = null
-  let lastMode: Mode = 'write'
 
   const input = h('textarea', { placeholder: '' })
   const status = h('span', { class: 'status' })
   const btn = (text: string, run: () => void, cls = '') => h('button', { textContent: text, className: cls, onclick: run })
   const b = {
-    continue: btn('Continue writing', () => start('continue')),
     image: btn('🖼 Image', () => image()),
-    generate: btn('Generate', () => start('write'), 'primary'),
+    write: btn('Write', () => start(), 'primary'),
     stop: btn('Stop', () => job && window.api.ai.cancel(job)),
     keep: btn('Keep', () => keep(), 'primary'),
     discard: btn('Discard', () => discard()),
-    retry: btn('Retry', () => (discard(), start(lastMode))),
+    retry: btn('Retry', () => (discard(), start())),
     close: btn('×', () => hide(), 'icon')
   }
   const textSource = sourcePicker('ai')
@@ -68,7 +67,7 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     h('header', {}, h('span', { class: 'spark', textContent: '✨' }), h('b', { textContent: 'AI' }), b.close),
     input,
     h('div', { class: 'sources' }, label('Text', textSource), label('Image', imageSource)),
-    h('div', { class: 'actions' }, b.continue, b.image, b.stop, b.discard, b.retry, b.generate, b.keep),
+    h('div', { class: 'actions' }, b.image, b.stop, b.discard, b.retry, b.write, b.keep),
     status
   )
   resizable(panel, grip)
@@ -76,17 +75,26 @@ export function createAi(view: EditorView, getPath: () => string | null) {
   b.image.title = 'Generate an image of what you typed and insert it at the cursor'
 
   const hasSelection = () => !view.state.selection.main.empty
+  const mode = (): Mode => (hasSelection() ? 'rewrite' : input.value.trim() ? 'write' : 'continue')
+  const labels: Record<Mode, [string, string]> = {
+    rewrite: ['Rewrite', 'Rewrite the selected text as the prompt says (Enter)'],
+    write: ['Write', 'Write what the prompt asks at the cursor (Enter)'],
+    continue: ['Continue', 'Continue the note from the cursor; type a prompt to ask for something specific (Enter)']
+  }
+  const updateWrite = () => ([b.write.textContent, b.write.title] = labels[mode()])
   const shown: Record<State, (keyof typeof b)[]> = {
-    idle: ['continue', 'image', 'generate', 'close'],
+    idle: ['image', 'write', 'close'],
     running: ['stop'],
     review: ['keep', 'discard', 'retry']
   }
   function setState(s: State, message = '', error = false) {
     state = s
     for (const [k, el] of Object.entries(b)) el.hidden = !shown[s].includes(k as keyof typeof b)
-    b.continue.hidden ||= hasSelection()
-    b.generate.textContent = hasSelection() ? 'Rewrite' : 'Generate'
-    input.placeholder = (hasSelection() ? 'How should AI rewrite the selection?' : 'Tell AI what to write here…') + '\n\nEnter to send, Shift+Enter for a new line'
+    b.image.hidden ||= hasSelection()
+    updateWrite()
+    input.placeholder = hasSelection()
+      ? 'How should AI rewrite the selection?\n\nLeave empty to just improve the writing.'
+      : 'What should AI write at the cursor?\n\nLeave empty to continue the note, or describe a picture and press Image.'
     input.disabled = textSource.disabled = imageSource.disabled = s !== 'idle'
     status.textContent = message
     status.classList.toggle('error', error)
@@ -107,15 +115,13 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     view.focus()
   }
 
-  async function start(mode: Mode) {
+  async function start() {
     const path = getPath()
     if (!path || state === 'running') return
     if (state === 'review') keep()
     const sel = view.state.selection.main
-    const m: Mode = sel.empty ? mode : 'rewrite'
+    const m = mode()
     const instruction = input.value.trim()
-    if (m === 'write' && !instruction) return input.focus()
-    lastMode = mode
     const req = { mode: m, instruction, path, doc: view.state.doc.toString(), from: sel.from, to: sel.to }
 
     // Generated text goes right after the selection; the note is locked while it streams in.
@@ -182,10 +188,11 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     view.focus()
   }
 
+  input.oninput = updateWrite
   input.onkeydown = (k) => {
     if (k.key === 'Enter' && !k.shiftKey) {
       k.preventDefault()
-      start('write')
+      start()
     }
     if (k.key === 'Escape') hide()
   }

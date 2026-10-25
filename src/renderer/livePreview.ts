@@ -60,42 +60,63 @@ export function previewSpans(state: EditorState, from = 0, to = state.doc.length
   return spans
 }
 
+// How embedded images are shown: `url` maps an image name to its URL, and `open` opens the image
+// in a new tab (on Ctrl+click or middle-click).
+export type Images = { url(name: string): string; open(name: string): void }
+
 class ImageWidget extends WidgetType {
-  src: string
-  constructor(src: string) {
+  name: string
+  images: Images
+  constructor(name: string, images: Images) {
     super()
-    this.src = src
+    this.name = name
+    this.images = images
   }
   eq(other: ImageWidget) {
-    return other.src === this.src
+    return other.name === this.name
   }
   toDOM() {
-    return Object.assign(document.createElement('img'), { src: this.src, className: 'cm-embed' })
+    const img = Object.assign(document.createElement('img'), { src: this.images.url(this.name), className: 'cm-embed', title: 'Ctrl+click to open in a new tab' })
+    const open = (ev: MouseEvent) => {
+      ev.preventDefault()
+      ev.stopPropagation()
+      this.images.open(this.name)
+    }
+    // Keep these clicks from the editor; a plain click still goes to it, showing the embed's text.
+    img.onmousedown = (ev) => {
+      if (ev.button === 1 || (ev.button === 0 && (ev.ctrlKey || ev.metaKey))) {
+        ev.preventDefault()
+        ev.stopPropagation()
+      }
+    }
+    img.onclick = (ev) => (ev.ctrlKey || ev.metaKey) && open(ev)
+    img.onauxclick = (ev) => ev.button === 1 && open(ev)
+    return img
   }
 }
 
 const hidden = Decoration.replace({})
 const quoteLine = Decoration.line({ class: 'cm-lp-quote' })
 
-function decorations(view: EditorView, imageUrl: (name: string) => string): DecorationSet {
+function decorations(view: EditorView, images: Images): DecorationSet {
   const { from } = view.visibleRanges[0] ?? { from: 0 }
   const { to } = view.visibleRanges.at(-1) ?? { to: 0 }
   const decos = previewSpans(view.state, from, to).map((s) =>
-    (s.kind === 'image' ? Decoration.replace({ widget: new ImageWidget(imageUrl(s.name!)) }) : s.kind === 'hide' ? hidden : quoteLine).range(s.from, s.to)
+    (s.kind === 'image' ? Decoration.replace({ widget: new ImageWidget(s.name!, images) }) : s.kind === 'hide' ? hidden : quoteLine).range(s.from, s.to)
   )
   return Decoration.set(decos, true)
 }
 
-const plugin = (imageUrl: (name: string) => string) =>
+const plugin = (images: Images) =>
   ViewPlugin.fromClass(
     class {
       decorations: DecorationSet
       constructor(view: EditorView) {
-        this.decorations = decorations(view, imageUrl)
+        this.decorations = decorations(view, images)
       }
       update(u: ViewUpdate) {
         if (u.docChanged || u.viewportChanged || u.selectionSet || syntaxTree(u.startState) !== syntaxTree(u.state))
-          this.decorations = decorations(u.view, imageUrl)
+          this.decorations = decorations(u.view, images)
       }
     },
     { decorations: (v) => v.decorations }
@@ -122,5 +143,4 @@ const theme = EditorView.theme({
 })
 
 // Obsidian-style Live Preview: Markdown renders inline, syntax shows only where the cursor is.
-// `imageUrl` maps an embedded image name to its URL.
-export const livePreview = (imageUrl: (name: string) => string) => [plugin(imageUrl), syntaxHighlighting(style), theme]
+export const livePreview = (images: Images) => [plugin(images), syntaxHighlighting(style), theme]

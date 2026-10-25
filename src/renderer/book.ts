@@ -66,7 +66,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
   const extensions = [
     basicSetup,
     markdown({ base: markdownLanguage }),
-    livePreview((name) => api.images.url(book, name)),
+    livePreview({ url: (name) => api.images.url(book, name), open: (name) => open(imageTab(name), true) }),
     ai.extension,
     EditorView.lineWrapping,
     EditorView.updateListener.of((u) => {

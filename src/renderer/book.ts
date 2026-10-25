@@ -20,7 +20,6 @@ function createEditor(pane: HTMLElement, crumbs: HTMLElement, book: string) {
   }
   const view = new EditorView({ parent: pane })
   const ai = createAi(view, () => current)
-  pane.after(ai.bar)
   const extensions = [
     basicSetup,
     markdown({ base: markdownLanguage }),
@@ -100,6 +99,7 @@ export function showBook(root: HTMLElement, book: { id: string; title: string })
     )
   )
   const editor = createEditor(pane, crumbs, book.id)
+  root.append(editor.ai.panel)
   const explorer = createExplorer(tree, editor)
   aiButton.onclick = () => editor.ai.toggle()
   newNote.onclick = () => explorer.create(false)

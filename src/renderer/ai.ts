@@ -38,15 +38,15 @@ window.api.ai.onChunk((id, text) => listeners.get(id)?.(text))
 
 type State = 'idle' | 'running' | 'review'
 
-// AI writing bar for the editor (Ctrl/Cmd+J): write at the cursor, continue the note, or rewrite
-// the selection. Text streams into the note, then Keep (one undo step) or Discard.
+// AI sidebar for the editor (Ctrl/Cmd+J): write at the cursor, continue the note, or rewrite
+// the selection. Drag its left edge to resize it. Text streams into the note, then Keep (one undo step) or Discard.
 // Image draws the typed description and embeds it at the cursor as ![[name]].
 export function createAi(view: EditorView, getPath: () => string | null) {
   let state: State = 'idle'
   let job: string | null = null
   let lastMode: Mode = 'write'
 
-  const input = h('input', { placeholder: '' })
+  const input = h('textarea', { placeholder: '' })
   const status = h('span', { class: 'status' })
   const btn = (text: string, run: () => void, cls = '') => h('button', { textContent: text, className: cls, onclick: run })
   const b = {
@@ -61,7 +61,17 @@ export function createAi(view: EditorView, getPath: () => string | null) {
   }
   const textSource = sourcePicker('ai')
   const imageSource = sourcePicker('image')
-  const bar = h('div', { class: 'ai-bar', hidden: true }, h('span', { class: 'spark', textContent: '✨' }), input, status, textSource, imageSource, ...Object.values(b))
+  const grip = h('div', { class: 'grip', title: 'Drag to resize' })
+  const label = (text: string, control: HTMLElement) => h('label', {}, h('span', { textContent: text }), control)
+  const panel = h('aside', { class: 'ai-panel', hidden: true },
+    grip,
+    h('header', {}, h('span', { class: 'spark', textContent: '✨' }), h('b', { textContent: 'AI' }), b.close),
+    input,
+    h('div', { class: 'sources' }, label('Text', textSource), label('Image', imageSource)),
+    h('div', { class: 'actions' }, b.continue, b.image, b.stop, b.discard, b.retry, b.generate, b.keep),
+    status
+  )
+  resizable(panel, grip)
   b.close.title = 'Close (Esc)'
   b.image.title = 'Generate an image of what you typed and insert it at the cursor'
 
@@ -76,16 +86,16 @@ export function createAi(view: EditorView, getPath: () => string | null) {
     for (const [k, el] of Object.entries(b)) el.hidden = !shown[s].includes(k as keyof typeof b)
     b.continue.hidden ||= hasSelection()
     b.generate.textContent = hasSelection() ? 'Rewrite' : 'Generate'
-    input.placeholder = hasSelection() ? 'How should AI rewrite the selection? (Enter)' : 'Tell AI what to write here… (Enter)'
+    input.placeholder = (hasSelection() ? 'How should AI rewrite the selection?' : 'Tell AI what to write here…') + '\n\nEnter to send, Shift+Enter for a new line'
     input.disabled = textSource.disabled = imageSource.disabled = s !== 'idle'
     status.textContent = message
     status.classList.toggle('error', error)
-    bar.dataset.state = s
+    panel.dataset.state = s
   }
 
   function show() {
     if (!getPath()) return
-    bar.hidden = false
+    panel.hidden = false
     if (state === 'idle') setState('idle')
     if (state === 'review') b.keep.focus()
     else input.focus()
@@ -93,7 +103,7 @@ export function createAi(view: EditorView, getPath: () => string | null) {
   function hide() {
     if (state === 'running') return
     if (state === 'review') keep()
-    bar.hidden = true
+    panel.hidden = true
     view.focus()
   }
 
@@ -173,23 +183,26 @@ export function createAi(view: EditorView, getPath: () => string | null) {
   }
 
   input.onkeydown = (k) => {
-    if (k.key === 'Enter') start('write')
+    if (k.key === 'Enter' && !k.shiftKey) {
+      k.preventDefault()
+      start('write')
+    }
     if (k.key === 'Escape') hide()
   }
-  bar.onkeydown = (k) => {
+  panel.onkeydown = (k) => {
     if (k.key === 'Escape' && state === 'review') discard()
   }
 
   setState('idle')
   return {
-    bar,
+    panel,
     show,
-    toggle: () => (bar.hidden ? show() : hide()),
+    toggle: () => (panel.hidden ? show() : hide()),
     extension: [
       spans,
       lock.of([]),
       keymap.of([{ key: 'Mod-j', run: () => (show(), true) }]),
-      EditorView.updateListener.of((u) => u.selectionSet && state === 'idle' && !bar.hidden && setState('idle', status.textContent ?? '', status.classList.contains('error')))
+      EditorView.updateListener.of((u) => u.selectionSet && state === 'idle' && !panel.hidden && setState('idle', status.textContent ?? '', status.classList.contains('error')))
     ],
     // Called before another note is loaded: stop any generation and keep what was written.
     settle() {
@@ -197,5 +210,39 @@ export function createAi(view: EditorView, getPath: () => string | null) {
       job = null
       setState('idle')
     }
+  }
+}
+
+// Dragging the grip sets the panel's width, which is remembered for next time.
+function resizable(panel: HTMLElement, grip: HTMLElement) {
+  const key = 'ai-panel-width'
+  const setWidth = (w: number) => {
+    const max = Math.max(260, window.innerWidth - 560) // leave room for the file tree and the note
+    panel.style.width = `${Math.round(Math.min(Math.max(w, 260), max))}px`
+  }
+  try {
+    const saved = Number(localStorage.getItem(key))
+    if (saved) setWidth(saved)
+  } catch {}
+  grip.onpointerdown = (ev) => {
+    ev.preventDefault()
+    grip.setPointerCapture(ev.pointerId)
+    const startX = ev.clientX
+    const startW = panel.getBoundingClientRect().width
+    panel.classList.add('resizing')
+    grip.onpointermove = (m) => setWidth(startW + startX - m.clientX)
+    grip.onpointerup = () => {
+      grip.onpointermove = grip.onpointerup = null
+      panel.classList.remove('resizing')
+      try {
+        localStorage.setItem(key, String(panel.getBoundingClientRect().width))
+      } catch {}
+    }
+  }
+  grip.ondblclick = () => {
+    panel.style.width = ''
+    try {
+      localStorage.removeItem(key)
+    } catch {}
   }
 }

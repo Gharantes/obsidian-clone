@@ -1,4 +1,4 @@
-import type { Book } from './api.ts'
+import type { Book, Section } from './api.ts'
 import { openSettings, imagePicker } from './settings.ts'
 import { ago, ask, h, modal, showMenu } from './ui.ts'
 
@@ -136,31 +136,21 @@ function card(b: Book, covers: string[], reload: () => void, report: (e: string 
   return el
 }
 
-// Main page: a grid of book covers, plus "New book" and "Import".
+// Main page: the books at the top, then each section's books, as grids of covers. Drag a book to
+// reorder it or move it into another section. Plus "New book", "New section" and "Import".
 export async function showLibrary(root: HTMLElement): Promise<void> {
   document.title = 'Library'
   root.className = 'library'
   const covers = await api.books.covers()
-  const grid = h('div', { class: 'grid' })
+  const shelves = h('div', { class: 'shelves' })
   const error = h('p', { class: 'error' })
   const search = h('input', { type: 'search', placeholder: 'Search books…' })
   const report = (msg: string | null) => (error.textContent = msg ?? '')
   let books: Book[] = []
+  let sections: Section[] = []
 
-  const render = () => {
-    const q = search.value.trim().toLowerCase()
-    const add = h('button', { class: 'book add', onclick: () => newBook(covers) }, h('div', { class: 'cover' }, h('span', { textContent: '+' })), h('b', { textContent: 'New book' }))
-    const shown = books.filter((b) => b.title.toLowerCase().includes(q))
-    const cards = shown.map((b) => {
-      const el = card(b, covers, reload, report)
-      // Reordering needs every book on show, so it's off while searching.
-      if (!q) draggable(el, b.id)
-      return el
-    })
-    grid.replaceChildren(...(q ? [] : [add]), ...cards)
-    if (q && !shown.length) grid.append(h('p', { class: 'muted', textContent: 'No books match.' }))
-  }
-  // Dragging a book moves it among the others as it goes; dropping saves the order.
+  // Dragging a book moves it among the others as it goes, across sections too; dropping saves
+  // where it landed. Reordering needs every book on show, so it's off while searching.
   let dragged: HTMLElement | null = null
   const draggable = (el: HTMLElement, id: string) => {
     el.draggable = true
@@ -179,19 +169,80 @@ export async function showLibrary(root: HTMLElement): Promise<void> {
       if (after ? el.nextElementSibling !== dragged : el.previousElementSibling !== dragged) el[after ? 'after' : 'before'](dragged)
     }
     el.ondrop = (ev) => ev.preventDefault()
-    el.ondragend = async () => {
+    el.ondragend = async (ev) => {
       el.classList.remove('dragging')
       dragged = null
+      // Dropped outside the grids (or cancelled with Esc): put everything back.
+      if (ev.dataTransfer?.dropEffect === 'none') return render()
+      const grid = el.parentElement!
+      const section = grid.dataset.section || null
       const ids = [...grid.querySelectorAll<HTMLElement>('.book[data-id]')].map((b) => b.dataset.id!)
-      if (ids.join() === books.map((b) => b.id).join()) return
-      books = ids.map((i) => books.find((b) => b.id === i)!)
-      await api.books.reorder(ids)
+      const was = books.filter((b) => b.section === section).map((b) => b.id)
+      if (ids.join() !== was.join()) await api.books.reorder(section, ids)
+      await reload()
     }
+  }
+  // Over a grid's empty space after its last book, or an empty section: the book goes at the end.
+  const dropZone = (grid: HTMLElement) => {
+    grid.ondragover = (ev) => {
+      if (!dragged) return
+      ev.preventDefault()
+      const last = grid.lastElementChild
+      if (last === dragged) return
+      const r = last?.getBoundingClientRect()
+      if (!r || ev.clientY > r.bottom || (ev.clientY >= r.top && ev.clientX > r.right)) grid.append(dragged)
+    }
+    grid.ondrop = (ev) => ev.preventDefault()
+  }
+
+  const sectionMenu = (s: Section) => (ev: MouseEvent) =>
+    showMenu(ev, [
+      { label: 'Rename…', run: () => ask('Rename section', { value: s.title, ok: 'Rename', check: (v) => api.sections.rename(s.id, v) }).then(reload) },
+      {
+        label: 'Delete section',
+        danger: true,
+        run: async () => {
+          if (!confirm(`Delete the section "${s.title}"? Its books move back to the top of the library.`)) return
+          await api.sections.remove(s.id)
+          await reload()
+        }
+      }
+    ])
+
+  // A section's header and grid; `section` null is the top of the library, which has no header.
+  const shelf = (section: Section | null, q: string): HTMLElement[] => {
+    const shown = books.filter((b) => b.section === (section?.id ?? null) && b.title.toLowerCase().includes(q))
+    if (q && !shown.length) return []
+    const grid = h('div', { class: 'grid' })
+    grid.dataset.section = section?.id ?? ''
+    const cards = shown.map((b) => {
+      const el = card(b, covers, reload, report)
+      if (!q) draggable(el, b.id)
+      return el
+    })
+    const add = h('button', { class: 'book add', onclick: () => newBook(covers) }, h('div', { class: 'cover' }, h('span', { textContent: '+' })), h('b', { textContent: 'New book' }))
+    grid.replaceChildren(...(q || section ? [] : [add]), ...cards)
+    if (!q) dropZone(grid)
+    if (!section) return [grid]
+    const menu = sectionMenu(section)
+    const head = h('div', { class: 'section-head' },
+      h('h2', { textContent: section.title }),
+      h('small', { textContent: String(shown.length) }),
+      h('button', { class: 'icon', title: 'Section options', textContent: '⋯', onclick: menu })
+    )
+    head.oncontextmenu = menu
+    return [head, grid]
+  }
+
+  const render = () => {
+    const q = search.value.trim().toLowerCase()
+    shelves.replaceChildren(...shelf(null, q), ...sections.flatMap((s) => shelf(s, q)))
+    if (q && !shelves.childElementCount) shelves.append(h('p', { class: 'muted', textContent: 'No books match.' }))
   }
   const reload = async () => {
     // Mid-drag, a reload would pull the cards out from under the pointer.
     if (dragged) return
-    books = await api.books.list()
+    ;[books, sections] = await Promise.all([api.books.list(), api.sections.list()])
     render()
   }
   search.oninput = render
@@ -200,6 +251,10 @@ export async function showLibrary(root: HTMLElement): Promise<void> {
     h('header', {},
       h('h1', { textContent: 'Library' }),
       search,
+      h('button', {
+        textContent: 'New section',
+        onclick: () => ask('New section', { placeholder: 'Section name', ok: 'Create', check: (v) => api.sections.create(v) }).then(reload)
+      }),
       h('button', {
         textContent: 'Import…',
         onclick: (ev: MouseEvent) =>
@@ -211,7 +266,7 @@ export async function showLibrary(root: HTMLElement): Promise<void> {
       h('button', { class: 'icon', title: 'Settings', textContent: '⚙', onclick: () => openSettings() })
     ),
     error,
-    grid
+    shelves
   )
   window.addEventListener('focus', reload)
   await reload()

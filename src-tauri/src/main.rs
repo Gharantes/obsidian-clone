@@ -203,8 +203,28 @@ fn book_cover(state: AppState, id: String, name: Option<String>) -> Result<(), S
 }
 
 #[tauri::command]
-fn book_reorder(state: AppState, ids: Vec<String>) -> Result<(), String> {
-    books::reorder(&state.lock().unwrap().db, &ids)
+fn book_reorder(state: AppState, section: Option<String>, ids: Vec<String>) -> Result<(), String> {
+    books::reorder(&state.lock().unwrap().db, section.as_deref(), &ids)
+}
+
+#[tauri::command]
+fn section_list(state: AppState) -> Result<Vec<books::Section>, String> {
+    books::sections(&state.lock().unwrap().db)
+}
+
+#[tauri::command]
+fn section_create(state: AppState, title: String) -> Option<String> {
+    books::create_section(&state.lock().unwrap().db, &title).err()
+}
+
+#[tauri::command]
+fn section_rename(state: AppState, id: String, title: String) -> Option<String> {
+    books::rename_section(&state.lock().unwrap().db, &id, &title).err()
+}
+
+#[tauri::command]
+fn section_remove(state: AppState, id: String) -> Result<(), String> {
+    books::remove_section(&state.lock().unwrap().db, &id)
 }
 
 #[tauri::command]
@@ -500,7 +520,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
-            book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_summary, book_tags, book_cover, book_reorder, book_remove,
+            book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_summary, book_tags, book_cover, book_reorder, book_remove, section_list, section_create, section_rename, section_remove,
             fs_list, fs_read, fs_write, fs_rename, fs_move, fs_remove, fs_create, fs_create_note,
             chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,

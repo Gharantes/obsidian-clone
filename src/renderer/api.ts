@@ -6,9 +6,12 @@ import { buildPrompt, mentioned, outline, SYSTEM, type AiRequest, type Turn } fr
 export type Entry = { path: string; name: string; folder: boolean; children?: Entry[] }
 
 // `cover` is the path of the book's cover image (see images), if it has one.
-export type Book = { id: string; ts: number; title: string; notes: number; color: string; cover: string | null; summary: string; tags: Tag[] }
+export type Book = { id: string; ts: number; title: string; notes: number; color: string; cover: string | null; summary: string; tags: Tag[]; section: string | null }
 
 export type Tag = { name: string; color: string }
+
+// A named group of books in the library.
+export type Section = { id: string; title: string }
 
 export type ApiConfig = { baseUrl: string; model: string; apiKey: string }
 
@@ -56,9 +59,18 @@ const books = {
   setCover: (id: string, name: string | null): Promise<void> => invoke('book_cover', { id, name }),
   setSummary: (id: string, summary: string): Promise<void> => invoke('book_summary', { id, summary }),
   setTags: (id: string, tags: Tag[]): Promise<void> => invoke('book_tags', { id, tags }),
-  // Sets the library's order, first to last.
-  reorder: (ids: string[]): Promise<void> => invoke('book_reorder', { ids }),
+  // Puts the books in a section (null: the top of the library) in this order, first to last.
+  reorder: (section: string | null, ids: string[]): Promise<void> => invoke('book_reorder', { section, ids }),
   remove: (id: string): Promise<string | null> => invoke('book_remove', { id })
+}
+
+// The library's sections, in order.
+const sections = {
+  list: (): Promise<Section[]> => invoke('section_list'),
+  create: (title: string): Promise<string | null> => invoke('section_create', { title }),
+  rename: (id: string, title: string): Promise<string | null> => invoke('section_rename', { id, title }),
+  // Its books go back to the top of the library.
+  remove: (id: string): Promise<void> => invoke('section_remove', { id })
 }
 
 const files = {
@@ -134,6 +146,7 @@ const images = {
 
 export const api = {
   books,
+  sections,
   files,
   images,
   settings: {

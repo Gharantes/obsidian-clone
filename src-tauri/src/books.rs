@@ -27,6 +27,15 @@ pub struct Book {
     pub summary: String,
     // The Tags page's list, in the order it was made.
     pub tags: Vec<Tag>,
+    // The library section the book is in; None for the top of the library.
+    pub section: Option<String>,
+}
+
+// A named group of books in the library.
+#[derive(Serialize, Debug, PartialEq)]
+pub struct Section {
+    pub id: String,
+    pub title: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -54,6 +63,8 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
     let db = Connection::open(file)?;
     db.execute_batch(
         "PRAGMA foreign_keys = ON;
+        -- Named groups of books in the library, in `pos` order.
+        CREATE TABLE IF NOT EXISTS sections (id TEXT PRIMARY KEY, title TEXT NOT NULL, pos INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS books (
             id TEXT PRIMARY KEY, title TEXT NOT NULL, color TEXT NOT NULL, ts INTEGER NOT NULL, open INTEGER NOT NULL DEFAULT 0
         );
@@ -95,6 +106,10 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
             "ALTER TABLE books ADD COLUMN pos INTEGER NOT NULL DEFAULT 0;
             UPDATE books SET pos = (SELECT COUNT(*) FROM books AS b WHERE b.ts > books.ts OR (b.ts = books.ts AND b.id < books.id));",
         )?;
+    }
+    // And before sections.
+    if db.prepare("SELECT section FROM books LIMIT 0").is_err() {
+        db.execute_batch("ALTER TABLE books ADD COLUMN section TEXT REFERENCES sections ON DELETE SET NULL")?;
     }
     // And before image folders.
     if db.prepare("SELECT folder FROM images LIMIT 0").is_err() {
@@ -162,10 +177,10 @@ pub fn random(n: u64) -> u64 {
     RandomState::new().hash_one(0) % n
 }
 
-const SELECT_BOOK: &str = "SELECT id, title, color, ts, (SELECT count(*) FROM entries WHERE book = id AND text IS NOT NULL), cover, summary, tags FROM books";
+const SELECT_BOOK: &str = "SELECT id, title, color, ts, (SELECT count(*) FROM entries WHERE book = id AND text IS NOT NULL), cover, summary, tags, section FROM books";
 
 fn book_row(r: &rusqlite::Row) -> rusqlite::Result<Book> {
-    Ok(Book { id: r.get(0)?, title: r.get(1)?, color: r.get(2)?, ts: r.get(3)?, notes: r.get(4)?, cover: r.get(5)?, summary: r.get(6)?, tags: parse_tags(&serde_json::from_str(&r.get::<_, String>(7)?).unwrap_or_default()) })
+    Ok(Book { id: r.get(0)?, title: r.get(1)?, color: r.get(2)?, ts: r.get(3)?, notes: r.get(4)?, cover: r.get(5)?, summary: r.get(6)?, tags: parse_tags(&serde_json::from_str(&r.get::<_, String>(7)?).unwrap_or_default()), section: r.get(8)? })
 }
 
 // In the library's order (see reorder); new books come first.
@@ -240,15 +255,46 @@ pub fn set_cover(db: &Connection, id: &str, name: Option<&str>) -> Result<(), St
     Ok(())
 }
 
-// Sets the library's order to `ids`, first to last; books left out keep their place after them.
-pub fn reorder(db: &Connection, ids: &[String]) -> Result<(), String> {
+// Puts `ids` in `section` (None: the top of the library) in that order, first to last; other books
+// keep their places after them.
+pub fn reorder(db: &Connection, section: Option<&str>, ids: &[String]) -> Result<(), String> {
     let tx = db.unchecked_transaction().map_err(err)?;
     let n = ids.len() as i64;
     tx.execute("UPDATE books SET pos = pos + ?1", [n]).map_err(err)?;
     for (i, id) in ids.iter().enumerate() {
-        tx.execute("UPDATE books SET pos = ?2 WHERE id = ?1", params![id, i as i64]).map_err(err)?;
+        tx.execute("UPDATE books SET pos = ?2, section = ?3 WHERE id = ?1", params![id, i as i64, section]).map_err(err)?;
     }
     tx.commit().map_err(err)
+}
+
+pub fn sections(db: &Connection) -> Result<Vec<Section>, String> {
+    let mut stmt = db.prepare("SELECT id, title FROM sections ORDER BY pos").map_err(err)?;
+    let sections = stmt.query_map([], |r| Ok(Section { id: r.get(0)?, title: r.get(1)? })).map_err(err)?.collect::<Result<_, _>>().map_err(err);
+    sections
+}
+
+fn section_title(title: &str) -> Result<&str, String> {
+    let title = title.trim();
+    if title.is_empty() { Err("Give the section a name".into()) } else { Ok(title) }
+}
+
+// Adds an empty section after the others; returns its id.
+pub fn create_section(db: &Connection, title: &str) -> Result<String, String> {
+    let title = section_title(title)?;
+    let id = format!("{:016x}", random(u64::MAX));
+    db.execute("INSERT INTO sections (id, title, pos) VALUES (?1, ?2, (SELECT COALESCE(MAX(pos), 0) + 1 FROM sections))", params![id, title]).map_err(err)?;
+    Ok(id)
+}
+
+pub fn rename_section(db: &Connection, id: &str, title: &str) -> Result<(), String> {
+    db.execute("UPDATE sections SET title = ?2 WHERE id = ?1", params![id, section_title(title)?]).map_err(err)?;
+    Ok(())
+}
+
+// Deletes a section; its books go back to the top of the library.
+pub fn remove_section(db: &Connection, id: &str) -> Result<(), String> {
+    db.execute("DELETE FROM sections WHERE id = ?1", [id]).map_err(err)?;
+    Ok(())
 }
 
 // Deletes a book and all its notes.
@@ -451,9 +497,20 @@ mod tests {
         let other = create(db, "Sequel", None).unwrap();
         let order = |db| list(db).unwrap().into_iter().map(|b| b.id).take(2).collect::<Vec<_>>();
         assert_eq!(order(db), [other.clone(), id.clone()], "new books come first");
-        reorder(db, &[id.clone(), other.clone()]).unwrap();
+        reorder(db, None, &[id.clone(), other.clone()]).unwrap();
         set_open(db, &other, true).unwrap();
         assert_eq!(order(db), [id.clone(), other.clone()], "the order stays when a book is opened");
+
+        assert!(create_section(db, "  ").is_err());
+        let shelf = create_section(db, "Shelf").unwrap();
+        let later = create_section(db, "Later").unwrap();
+        rename_section(db, &shelf, " Favorites ").unwrap();
+        assert_eq!(sections(db).unwrap(), [Section { id: shelf.clone(), title: "Favorites".into() }, Section { id: later.clone(), title: "Later".into() }]);
+        reorder(db, Some(&shelf), &[other.clone()]).unwrap();
+        assert_eq!(get(db, &other).unwrap().section.as_deref(), Some(shelf.as_str()));
+        assert_eq!(get(db, &id).unwrap().section, None, "other books stay where they are");
+        remove_section(db, &shelf).unwrap();
+        assert_eq!(get(db, &other).unwrap().section, None, "a deleted section's books go back to the top");
         remove(db, &other).unwrap();
 
         remove(db, &id).unwrap();

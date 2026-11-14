@@ -56,6 +56,8 @@ const books = {
   setCover: (id: string, name: string | null): Promise<void> => invoke('book_cover', { id, name }),
   setSummary: (id: string, summary: string): Promise<void> => invoke('book_summary', { id, summary }),
   setTags: (id: string, tags: Tag[]): Promise<void> => invoke('book_tags', { id, tags }),
+  // Sets the library's order, first to last.
+  reorder: (ids: string[]): Promise<void> => invoke('book_reorder', { ids }),
   remove: (id: string): Promise<string | null> => invoke('book_remove', { id })
 }
 

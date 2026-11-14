@@ -89,6 +89,13 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
     if db.prepare("SELECT tags FROM books LIMIT 0").is_err() {
         db.execute_batch("ALTER TABLE books ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")?;
     }
+    // And before the library's order, which was most recently opened first.
+    if db.prepare("SELECT pos FROM books LIMIT 0").is_err() {
+        db.execute_batch(
+            "ALTER TABLE books ADD COLUMN pos INTEGER NOT NULL DEFAULT 0;
+            UPDATE books SET pos = (SELECT COUNT(*) FROM books AS b WHERE b.ts > books.ts OR (b.ts = books.ts AND b.id < books.id));",
+        )?;
+    }
     // And before image folders.
     if db.prepare("SELECT folder FROM images LIMIT 0").is_err() {
         db.execute_batch("ALTER TABLE images ADD COLUMN folder TEXT NOT NULL DEFAULT ''")?;
@@ -161,9 +168,9 @@ fn book_row(r: &rusqlite::Row) -> rusqlite::Result<Book> {
     Ok(Book { id: r.get(0)?, title: r.get(1)?, color: r.get(2)?, ts: r.get(3)?, notes: r.get(4)?, cover: r.get(5)?, summary: r.get(6)?, tags: parse_tags(&serde_json::from_str(&r.get::<_, String>(7)?).unwrap_or_default()) })
 }
 
-// Most recently opened first.
+// In the library's order (see reorder); new books come first.
 pub fn list(db: &Connection) -> Result<Vec<Book>, String> {
-    let mut stmt = db.prepare(&format!("{SELECT_BOOK} ORDER BY ts DESC")).map_err(err)?;
+    let mut stmt = db.prepare(&format!("{SELECT_BOOK} ORDER BY pos, ts DESC")).map_err(err)?;
     let books = stmt.query_map([], book_row).map_err(err)?.collect::<Result<_, _>>().map_err(err);
     books
 }
@@ -195,7 +202,11 @@ pub fn create(db: &Connection, title: &str, color: Option<&str>) -> Result<Strin
     }
     let id = format!("{:016x}", random(u64::MAX));
     let color = color.unwrap_or(COVERS[random(COVERS.len() as u64) as usize]);
-    db.execute("INSERT INTO books (id, title, color, ts) VALUES (?1, ?2, ?3, ?4)", params![id, title, color, now_ms()]).map_err(err)?;
+    db.execute(
+        "INSERT INTO books (id, title, color, ts, pos) VALUES (?1, ?2, ?3, ?4, (SELECT COALESCE(MIN(pos), 0) - 1 FROM books))",
+        params![id, title, color, now_ms()],
+    )
+    .map_err(err)?;
     Ok(id)
 }
 
@@ -227,6 +238,17 @@ pub fn set_tags(db: &Connection, id: &str, tags: &[Tag]) -> Result<(), String> {
 pub fn set_cover(db: &Connection, id: &str, name: Option<&str>) -> Result<(), String> {
     db.execute("UPDATE books SET cover = ?2 WHERE id = ?1", params![id, name]).map_err(err)?;
     Ok(())
+}
+
+// Sets the library's order to `ids`, first to last; books left out keep their place after them.
+pub fn reorder(db: &Connection, ids: &[String]) -> Result<(), String> {
+    let tx = db.unchecked_transaction().map_err(err)?;
+    let n = ids.len() as i64;
+    tx.execute("UPDATE books SET pos = pos + ?1", [n]).map_err(err)?;
+    for (i, id) in ids.iter().enumerate() {
+        tx.execute("UPDATE books SET pos = ?2 WHERE id = ?1", params![id, i as i64]).map_err(err)?;
+    }
+    tx.commit().map_err(err)
 }
 
 // Deletes a book and all its notes.
@@ -424,7 +446,15 @@ mod tests {
         assert_eq!(open_ids(db).unwrap(), [id.clone()]);
         files::write(db, &id, "Intro.md", "hi").unwrap();
         let first = &list(db).unwrap()[0];
-        assert_eq!((first.title.as_str(), first.color.as_str(), first.notes), ("Saga", "#abcdef", 1), "most recently opened first");
+        assert_eq!((first.title.as_str(), first.color.as_str(), first.notes), ("Saga", "#abcdef", 1));
+
+        let other = create(db, "Sequel", None).unwrap();
+        let order = |db| list(db).unwrap().into_iter().map(|b| b.id).take(2).collect::<Vec<_>>();
+        assert_eq!(order(db), [other.clone(), id.clone()], "new books come first");
+        reorder(db, &[id.clone(), other.clone()]).unwrap();
+        set_open(db, &other, true).unwrap();
+        assert_eq!(order(db), [id.clone(), other.clone()], "the order stays when a book is opened");
+        remove(db, &other).unwrap();
 
         remove(db, &id).unwrap();
         assert!(title(db, &id).is_err());

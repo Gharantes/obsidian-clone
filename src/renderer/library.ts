@@ -151,10 +151,46 @@ export async function showLibrary(root: HTMLElement): Promise<void> {
     const q = search.value.trim().toLowerCase()
     const add = h('button', { class: 'book add', onclick: () => newBook(covers) }, h('div', { class: 'cover' }, h('span', { textContent: '+' })), h('b', { textContent: 'New book' }))
     const shown = books.filter((b) => b.title.toLowerCase().includes(q))
-    grid.replaceChildren(...(q ? [] : [add]), ...shown.map((b) => card(b, covers, reload, report)))
+    const cards = shown.map((b) => {
+      const el = card(b, covers, reload, report)
+      // Reordering needs every book on show, so it's off while searching.
+      if (!q) draggable(el, b.id)
+      return el
+    })
+    grid.replaceChildren(...(q ? [] : [add]), ...cards)
     if (q && !shown.length) grid.append(h('p', { class: 'muted', textContent: 'No books match.' }))
   }
+  // Dragging a book moves it among the others as it goes; dropping saves the order.
+  let dragged: HTMLElement | null = null
+  const draggable = (el: HTMLElement, id: string) => {
+    el.draggable = true
+    el.dataset.id = id
+    el.ondragstart = (ev) => {
+      dragged = el
+      ev.dataTransfer!.effectAllowed = 'move'
+      requestAnimationFrame(() => el.classList.add('dragging'))
+    }
+    el.ondragover = (ev) => {
+      if (!dragged) return
+      ev.preventDefault()
+      if (dragged === el) return
+      const r = el.getBoundingClientRect()
+      const after = ev.clientX > r.left + r.width / 2
+      if (after ? el.nextElementSibling !== dragged : el.previousElementSibling !== dragged) el[after ? 'after' : 'before'](dragged)
+    }
+    el.ondrop = (ev) => ev.preventDefault()
+    el.ondragend = async () => {
+      el.classList.remove('dragging')
+      dragged = null
+      const ids = [...grid.querySelectorAll<HTMLElement>('.book[data-id]')].map((b) => b.dataset.id!)
+      if (ids.join() === books.map((b) => b.id).join()) return
+      books = ids.map((i) => books.find((b) => b.id === i)!)
+      await api.books.reorder(ids)
+    }
+  }
   const reload = async () => {
+    // Mid-drag, a reload would pull the cards out from under the pointer.
+    if (dragged) return
     books = await api.books.list()
     render()
   }

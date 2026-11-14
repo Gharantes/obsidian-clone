@@ -203,6 +203,11 @@ fn book_cover(state: AppState, id: String, name: Option<String>) -> Result<(), S
 }
 
 #[tauri::command]
+fn book_reorder(state: AppState, ids: Vec<String>) -> Result<(), String> {
+    books::reorder(&state.lock().unwrap().db, &ids)
+}
+
+#[tauri::command]
 fn book_remove(state: AppState, id: String) -> Option<String> {
     let st = state.lock().unwrap();
     if st.window_with(&id).is_some() {
@@ -495,7 +500,7 @@ fn main() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
-            book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_summary, book_tags, book_cover, book_remove,
+            book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_summary, book_tags, book_cover, book_reorder, book_remove,
             fs_list, fs_read, fs_write, fs_rename, fs_move, fs_remove, fs_create, fs_create_note,
             chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,

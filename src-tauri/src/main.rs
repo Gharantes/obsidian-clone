@@ -167,12 +167,11 @@ async fn book_close(app: AppHandle, window: WebviewWindow) {
     reload(&window);
 }
 
+// The window's book, or None for the library.
 #[tauri::command]
-fn book_current(state: AppState, window: WebviewWindow) -> Option<Value> {
+fn book_current(state: AppState, window: WebviewWindow) -> Option<books::Book> {
     let st = state.lock().unwrap();
-    let id = st.book_of(window.label()).ok()?;
-    let title = books::title(&st.db, &id).ok()?;
-    Some(json!({ "id": id, "title": title }))
+    books::get(&st.db, &st.book_of(window.label()).ok()?).ok()
 }
 
 #[tauri::command]
@@ -183,6 +182,11 @@ fn book_rename(state: AppState, id: String, title: String) -> Option<String> {
 #[tauri::command]
 fn book_color(state: AppState, id: String, color: String) -> Result<(), String> {
     books::set_color(&state.lock().unwrap().db, &id, &color)
+}
+
+#[tauri::command]
+fn book_summary(state: AppState, id: String, summary: String) -> Result<(), String> {
+    books::set_summary(&state.lock().unwrap().db, &id, &summary)
 }
 
 #[tauri::command]
@@ -485,7 +489,7 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_cover, book_remove,
+            book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_summary, book_cover, book_remove,
             fs_list, fs_read, fs_write, fs_rename, fs_nest, fs_move, fs_remove, fs_create, fs_create_note,
             chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,

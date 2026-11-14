@@ -24,6 +24,7 @@ pub struct Book {
     pub notes: i64,
     // Name of the cover image, if the book has one.
     pub cover: Option<String>,
+    pub summary: String,
 }
 
 // Opens the database holding every book and note, creating its tables if needed.
@@ -58,6 +59,10 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
     if db.prepare("SELECT cover FROM books LIMIT 0").is_err() {
         db.execute_batch("ALTER TABLE books ADD COLUMN cover TEXT")?;
     }
+    // And before summaries.
+    if db.prepare("SELECT summary FROM books LIMIT 0").is_err() {
+        db.execute_batch("ALTER TABLE books ADD COLUMN summary TEXT NOT NULL DEFAULT ''")?;
+    }
     // And before image folders.
     if db.prepare("SELECT folder FROM images LIMIT 0").is_err() {
         db.execute_batch("ALTER TABLE images ADD COLUMN folder TEXT NOT NULL DEFAULT ''")?;
@@ -74,14 +79,21 @@ pub fn random(n: u64) -> u64 {
     RandomState::new().hash_one(0) % n
 }
 
+const SELECT_BOOK: &str = "SELECT id, title, color, ts, (SELECT count(*) FROM entries WHERE book = id AND text IS NOT NULL), cover, summary FROM books";
+
+fn book_row(r: &rusqlite::Row) -> rusqlite::Result<Book> {
+    Ok(Book { id: r.get(0)?, title: r.get(1)?, color: r.get(2)?, ts: r.get(3)?, notes: r.get(4)?, cover: r.get(5)?, summary: r.get(6)? })
+}
+
 // Most recently opened first.
 pub fn list(db: &Connection) -> Result<Vec<Book>, String> {
-    let mut stmt = db
-        .prepare("SELECT id, title, color, ts, (SELECT count(*) FROM entries WHERE book = id AND text IS NOT NULL), cover FROM books ORDER BY ts DESC")
-        .map_err(err)?;
-    let rows = stmt.query_map([], |r| Ok(Book { id: r.get(0)?, title: r.get(1)?, color: r.get(2)?, ts: r.get(3)?, notes: r.get(4)?, cover: r.get(5)? }));
-    let books = rows.map_err(err)?.collect::<Result<_, _>>().map_err(err);
+    let mut stmt = db.prepare(&format!("{SELECT_BOOK} ORDER BY ts DESC")).map_err(err)?;
+    let books = stmt.query_map([], book_row).map_err(err)?.collect::<Result<_, _>>().map_err(err);
     books
+}
+
+pub fn get(db: &Connection, id: &str) -> Result<Book, String> {
+    db.query_row(&format!("{SELECT_BOOK} WHERE id = ?1"), [id], book_row).optional().map_err(err)?.ok_or_else(|| "Book not found".into())
 }
 
 pub fn title(db: &Connection, id: &str) -> Result<String, String> {
@@ -125,6 +137,11 @@ pub fn set_color(db: &Connection, id: &str, color: &str) -> Result<(), String> {
     Ok(())
 }
 
+pub fn set_summary(db: &Connection, id: &str, summary: &str) -> Result<(), String> {
+    db.execute("UPDATE books SET summary = ?2 WHERE id = ?1", params![id, summary]).map_err(err)?;
+    Ok(())
+}
+
 // Sets the cover image (one of the book's images), or None for the plain color cover.
 pub fn set_cover(db: &Connection, id: &str, name: Option<&str>) -> Result<(), String> {
     db.execute("UPDATE books SET cover = ?2 WHERE id = ?1", params![id, name]).map_err(err)?;
@@ -148,19 +165,28 @@ fn attachments_folder(dir: &str) -> Option<&str> {
     if dir == ATTACHMENTS { Some("") } else { dir.strip_prefix(ATTACHMENTS).and_then(|d| d.strip_prefix('/')) }
 }
 
-// Color and cover image name from .book.json.
-fn read_meta(meta: &str) -> (Option<String>, Option<String>) {
+// Settings kept in .book.json.
+#[derive(Default)]
+struct Meta {
+    color: Option<String>,
+    // Cover image name.
+    cover: Option<String>,
+    summary: Option<String>,
+}
+
+fn read_meta(meta: &str) -> Meta {
     let json = serde_json::from_str::<serde_json::Value>(meta).unwrap_or_default();
     let get = |k: &str| json[k].as_str().map(String::from);
-    (get("color"), get("cover"))
+    Meta { color: get("color"), cover: get("cover"), summary: get("summary") }
 }
 
 // Creates a book from imported entries, adding any missing parent folders. Returns its id.
 // Images keep the folder they were in (see attachments_folder), and folders under attachments/
 // become image folders rather than notes' folders.
-fn import(db: &Connection, title: &str, (color, cover): (Option<String>, Option<String>), entries: Entries, imgs: Images) -> Result<String, String> {
+fn import(db: &Connection, title: &str, Meta { color, cover, summary }: Meta, entries: Entries, imgs: Images) -> Result<String, String> {
     let tx = db.unchecked_transaction().map_err(err)?;
     let id = create(&tx, title, color.as_deref())?;
+    set_summary(&tx, &id, summary.as_deref().unwrap_or(""))?;
     for (path, data) in &imgs {
         let dir = parent_of(path);
         images::add(&tx, &id, attachments_folder(dir).unwrap_or(dir), base_name(path), data)?;
@@ -223,14 +249,14 @@ pub fn import_folder(db: &Connection, dir: &Path) -> Result<String, String> {
 // Same as import_folder for a .zip (e.g. one made by export_zip).
 pub fn import_zip(db: &Connection, file: &Path) -> Result<String, String> {
     let mut zip = zip::ZipArchive::new(File::open(file).map_err(err)?).map_err(err)?;
-    let (mut entries, mut imgs, mut meta) = (Vec::new(), Vec::new(), (None, None));
+    let (mut entries, mut imgs, mut meta) = (Vec::new(), Vec::new(), Meta::default());
     for i in 0..zip.len() {
         let mut f = zip.by_index(i).map_err(err)?;
         let Some(name) = f.enclosed_name() else { continue };
         let path = name.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/");
         let mut text = String::new();
         if path == META {
-            meta = f.read_to_string(&mut text).map_or((None, None), |_| read_meta(&text));
+            meta = f.read_to_string(&mut text).map_or_else(|_| Meta::default(), |_| read_meta(&text));
         } else if path.is_empty() || path.split('/').any(|p| p.starts_with('.')) {
             continue;
         } else if f.is_dir() {
@@ -247,16 +273,17 @@ pub fn import_zip(db: &Connection, file: &Path) -> Result<String, String> {
     import(db, &title, meta, entries, imgs)
 }
 
-// Writes a book as a .zip of its folders, .md notes and attachments/ images, plus its cover in .book.json.
+// Writes a book as a .zip of its folders, .md notes and attachments/ images, plus its cover and
+// summary in .book.json.
 pub fn export_zip(db: &Connection, id: &str, file: &Path) -> Result<(), String> {
-    let (color, cover): (String, Option<String>) = db.query_row("SELECT color, cover FROM books WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?;
+    let Book { color, cover, summary, .. } = get(db, id)?;
     let mut stmt = db.prepare("SELECT path, text FROM entries WHERE book = ?1 ORDER BY path").map_err(err)?;
     let entries: Entries = stmt.query_map([id], |r| Ok((r.get(0)?, r.get(1)?))).map_err(err)?.collect::<Result<_, _>>().map_err(err)?;
 
     let mut zip = zip::ZipWriter::new(File::create(file).map_err(err)?);
     let opts = SimpleFileOptions::default();
     zip.start_file(META, opts).map_err(err)?;
-    zip.write_all(serde_json::json!({ "color": color, "cover": cover }).to_string().as_bytes()).map_err(err)?;
+    zip.write_all(serde_json::json!({ "color": color, "cover": cover, "summary": summary }).to_string().as_bytes()).map_err(err)?;
     // Image folders as attachments/ subfolders, so empty ones are kept too.
     for folder in images::list(db, id)?.folders {
         zip.add_directory(format!("{ATTACHMENTS}/{folder}"), opts).map_err(err)?;
@@ -298,6 +325,8 @@ mod tests {
 
         rename(db, &id, "Saga").unwrap();
         set_color(db, &id, "#abcdef").unwrap();
+        set_summary(db, &id, "A long tale.").unwrap();
+        assert_eq!(get(db, &id).unwrap().summary, "A long tale.");
         set_open(db, &id, true).unwrap();
         assert_eq!(open_ids(db).unwrap(), [id.clone()]);
         files::write(db, &id, "Intro.md", "hi").unwrap();
@@ -314,7 +343,7 @@ mod tests {
         let db = &test_db();
         let dir = temp_dir().join("Old Book");
         fs::create_dir_all(dir.join("Part 1/Scenes")).unwrap();
-        fs::write(dir.join(META), r##"{"color":"#123456","cover":"Map.png"}"##).unwrap();
+        fs::write(dir.join(META), r##"{"color":"#123456","cover":"Map.png","summary":"Old tale."}"##).unwrap();
         for f in ["Part 1/Part 1.md", "Part 1/Scenes/Scene.md", "Intro.md", "notes.txt", ".hidden.md"] {
             fs::write(dir.join(f), f).unwrap();
         }
@@ -323,7 +352,7 @@ mod tests {
         let id = import_folder(db, &dir).unwrap();
         let book = list(db).unwrap().into_iter().find(|b| b.id == id).unwrap();
         assert_eq!((book.title.as_str(), book.color.as_str(), book.notes), ("Old Book", "#123456", 3), "skips other files and dot-files");
-        assert_eq!(book.cover.as_deref(), Some("Map.png"));
+        assert_eq!((book.cover.as_deref(), book.summary.as_str()), (Some("Map.png"), "Old tale."));
         assert_eq!(images::get(db, &id, "Map.png").unwrap().as_deref(), Some(&b"\x89PNG"[..]), "images are keyed by file name");
         assert_eq!(images::list(db, &id).unwrap().images, [("Map.png".into(), "Part 1".into())], "keeps the image's folder");
         images::create_folder(db, &id, "Part 1", "Empty").unwrap();
@@ -333,7 +362,7 @@ mod tests {
         let copy = import_zip(db, &zip).unwrap();
         assert_eq!(files::list_tree(db, &copy), files::list_tree(db, &id), "round-trips the tree");
         assert_eq!(files::read(db, &copy, "Part 1/Scenes/Scene.md").unwrap(), "Part 1/Scenes/Scene.md");
-        assert_eq!(title(db, &copy).unwrap(), "Old Book");
+        assert_eq!((title(db, &copy).unwrap().as_str(), get(db, &copy).unwrap().summary.as_str()), ("Old Book", "Old tale."));
         assert_eq!(images::all(db, &copy).unwrap(), images::all(db, &id).unwrap(), "round-trips images");
         assert_eq!(images::list(db, &copy).unwrap(), images::list(db, &id).unwrap(), "and their folders");
         assert_eq!(list(db).unwrap().into_iter().find(|b| b.id == copy).unwrap().cover.as_deref(), Some("Map.png"));

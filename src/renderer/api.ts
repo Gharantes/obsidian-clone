@@ -7,7 +7,7 @@ import { stripMarkers } from './sections.ts'
 export type Entry = { path: string; name: string; folder: boolean; note?: string; children?: Entry[] }
 
 // `cover` is the name of the book's cover image, if it has one.
-export type Book = { id: string; ts: number; title: string; notes: number; color: string; cover: string | null }
+export type Book = { id: string; ts: number; title: string; notes: number; color: string; cover: string | null; summary: string }
 
 export type ApiConfig = { baseUrl: string; model: string; apiKey: string }
 
@@ -48,10 +48,12 @@ const books = {
   import: (zip: boolean): Promise<string | null> => invoke('book_import', { zip }),
   export: (id: string): Promise<string | null> => invoke('book_export', { id }),
   close: (): Promise<void> => invoke('book_close'),
-  current: (): Promise<{ id: string; title: string } | null> => invoke('book_current'),
+  // The window's book; null in the library.
+  current: (): Promise<Book | null> => invoke('book_current'),
   rename: (id: string, title: string): Promise<string | null> => invoke('book_rename', { id, title }),
   setColor: (id: string, color: string): Promise<void> => invoke('book_color', { id, color }),
   setCover: (id: string, name: string | null): Promise<void> => invoke('book_cover', { id, name }),
+  setSummary: (id: string, summary: string): Promise<void> => invoke('book_summary', { id, summary }),
   remove: (id: string): Promise<string | null> => invoke('book_remove', { id })
 }
 

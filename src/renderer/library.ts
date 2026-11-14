@@ -5,7 +5,7 @@ import { ago, ask, h, modal, showMenu } from './ui.ts'
 const { api } = window
 
 // Picks a cover color; resolves to the color or null when cancelled.
-function pickCover(title: string, covers: string[], current?: string): Promise<string | null> {
+export function pickCover(title: string, covers: string[], current?: string): Promise<string | null> {
   return new Promise((resolve) => {
     let chosen: string | null = null
     const swatches = h('div', { class: 'swatches' })
@@ -55,7 +55,7 @@ async function newBook(covers: string[]): Promise<void> {
 }
 
 // Asks for a description and draws a cover image for the book; resolves when done or cancelled.
-function generateCover(b: Book): Promise<void> {
+export function generateCover(b: { id: string; title: string }): Promise<void> {
   return new Promise((resolve) => {
     const job = crypto.randomUUID()
     const input = h('input', { value: `Book cover illustration for "${b.title}", no text` })

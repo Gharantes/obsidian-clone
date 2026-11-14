@@ -317,6 +317,8 @@ const icons = {
   details: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/><path d="M9 7h7M9 11h5"/></svg>',
   image: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></svg>',
   characters: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  locations: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>',
+  species: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="4" r="2"/><circle cx="18" cy="8" r="2"/><circle cx="20" cy="16" r="2"/><path d="M9 10a5 5 0 0 1 5 5v3.5a3.5 3.5 0 0 1-6.84 1.045Q6.52 17.48 4.46 16.84A3.5 3.5 0 0 1 5.5 10Z"/></svg>',
   extras: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7M14 17.5h7"/></svg>',
   folder: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>'
 }
@@ -384,6 +386,12 @@ function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
   }
 }
 
+// An optional panel that has nothing in it yet.
+function placeholderPanel(id: string, title: string, icon: string): Panel {
+  const el = h('div', { class: 'panel extra' }, h('p', { class: 'empty-hint muted', textContent: `No ${title.toLowerCase()} yet.` }))
+  return { id, title, icon, el, optional: true }
+}
+
 // A book: ribbon and sidebar (file tree) on the left, tabs of open notes on the right.
 export function showBook(root: HTMLElement, book: Book): void {
   document.title = book.title
@@ -415,13 +423,9 @@ export function showBook(root: HTMLElement, book: Book): void {
   const ribbon = createRibbon(nav, book.id, [
     { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) },
     { id: 'assets', title: 'Assets', icon: icons.image, el: assets.el, shown: assets.load },
-    {
-      id: 'characters',
-      title: 'Characters',
-      icon: icons.characters,
-      optional: true,
-      el: h('div', { class: 'panel characters' }, h('p', { class: 'empty-hint muted', textContent: 'No characters yet.' }))
-    }
+    placeholderPanel('characters', 'Characters', icons.characters),
+    placeholderPanel('locations', 'Locations', icons.locations),
+    placeholderPanel('species', 'Species', icons.species)
   ])
   ribbon.el.append(
     h('button', { class: 'icon', title: 'Details', innerHTML: icons.details, onclick: () => editor.details() }),

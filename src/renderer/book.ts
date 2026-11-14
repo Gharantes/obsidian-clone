@@ -27,6 +27,8 @@ type EditorOpts = {
   selected(path: string | null): void
   // Rereads the file tree after notes changed outside the explorer.
   refresh(): void
+  // Shows the sidebar panel listing the tab's note or image (a Ctrl+click or Ctrl+Tab to it).
+  reveal(path: string | null): void
   // Right-click on an image tab's image, by the image's path.
   imageMenu(ev: MouseEvent, path: string): void
   // For the Details tab's page.
@@ -126,7 +128,10 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     })
   ]
   const bar = createTabBar({
-    select: (i) => activate(tabs[i]),
+    select(i, ctrl) {
+      activate(tabs[i])
+      if (ctrl) o.reveal(tabs[i].path)
+    },
     close: (i) => closeWhere((t) => t === tabs[i]),
     closeOthers: (i) => closeWhere((t) => t !== tabs[i]),
     closeAll: () => closeWhere(() => true),
@@ -270,11 +275,13 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       else add(DETAILS_TAB)
     },
     closeTab: () => active && closeWhere((t) => t === active),
-    // Shows the tab `by` places to the right (negative: left), wrapping around.
+    // Shows the tab `by` places to the right (negative: left), wrapping around, and its panel in
+    // the sidebar.
     cycle(by: number) {
       if (!active) return
       const n = tabs.length
       activate(tabs[(((tabs.indexOf(active) + by) % n) + n) % n])
+      o.reveal(active.path)
     },
     renamed(from: string, to: string) {
       for (const t of tabs) if (t.path) t.path = movePath(t.path, from, to)
@@ -317,7 +324,7 @@ type Panel = { id: string; title: string; icon: string; el: HTMLElement; shown?:
 
 // The ribbon: a narrow column of buttons, one per sidebar panel. A button shows its panel in the
 // sidebar; clicking the shown panel's button again collapses the sidebar. Remembered per book.
-function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]): HTMLElement {
+function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
   const key = `sidebar:${book}`
   let shown: string | null = panels[0].id
   try {
@@ -344,7 +351,11 @@ function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]): HTML
   }
   sidebar.append(...panels.map((p) => p.el))
   show(shown)
-  return h('aside', { class: 'ribbon' }, ...buttons)
+  return {
+    el: h('aside', { class: 'ribbon' }, ...buttons),
+    // Shows the panel, leaving it open if it already is.
+    reveal: (id: string) => shown !== id && show(id)
+  }
 }
 
 // A book: ribbon and sidebar (file tree) on the left, tabs of open notes on the right.
@@ -379,9 +390,9 @@ export function showBook(root: HTMLElement, book: Book): void {
     { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) },
     { id: 'assets', title: 'Assets', icon: icons.image, el: assets.el, shown: assets.load }
   ])
-  ribbon.append(h('button', { class: 'icon', title: 'Details', innerHTML: icons.details, onclick: () => editor.details() }))
-  ribbon.append(h('button', { class: 'icon settings', textContent: '⚙', title: 'Settings', onclick: () => openSettings() }))
-  root.replaceChildren(ribbon, nav, main)
+  ribbon.el.append(h('button', { class: 'icon', title: 'Details', innerHTML: icons.details, onclick: () => editor.details() }))
+  ribbon.el.append(h('button', { class: 'icon settings', textContent: '⚙', title: 'Settings', onclick: () => openSettings() }))
+  root.replaceChildren(ribbon.el, nav, main)
   const editor = createEditor(main, pane, crumbs, book.id, {
     openNote: (path, newTab) => explorer.open(path, newTab),
     selected(path) {
@@ -389,6 +400,10 @@ export function showBook(root: HTMLElement, book: Book): void {
       assets.select(path)
     },
     refresh: () => explorer.refresh(),
+    reveal(path) {
+      if (imageName(path)) ribbon.reveal('assets')
+      else if (path?.endsWith('.md')) ribbon.reveal('files')
+    },
     imageMenu: (ev, path) => assets.menu(ev, path),
     details: {
       renamed(title) {

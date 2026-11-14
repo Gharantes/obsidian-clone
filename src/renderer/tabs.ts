@@ -41,7 +41,8 @@ export function saveTabs(book: string, paths: (string | null)[], active: number)
 }
 
 type Handlers = {
-  select(i: number): void
+  // `ctrl`: Ctrl (or Cmd) was held while clicking.
+  select(i: number, ctrl: boolean): void
   close(i: number): void
   closeOthers(i: number): void
   closeAll(): void
@@ -49,7 +50,7 @@ type Handlers = {
   add(): void
 }
 
-// The strip of tabs above the note: click to switch, × or middle-click to close, drag to reorder,
+// The strip of tabs above the note: click to switch (Ctrl+click also reveals it in the sidebar), × or middle-click to close, drag to reorder,
 // right-click for more; "+" opens an empty tab.
 export function createTabBar(o: Handlers) {
   const el = h('div', { class: 'tabs' })
@@ -60,7 +61,7 @@ export function createTabBar(o: Handlers) {
       ...paths.map((p, i) => {
         const close = h('button', { textContent: '×', title: 'Close (Ctrl+W)', onclick: (ev: MouseEvent) => (ev.stopPropagation(), o.close(i)) })
         const tab = h('div', { class: `tab${i === active ? ' active' : ''}`, title: p ?? '', draggable: true }, h('span', { textContent: tabTitle(p) }), close)
-        tab.onclick = () => o.select(i)
+        tab.onclick = (ev) => o.select(i, ev.ctrlKey || ev.metaKey)
         tab.onmousedown = (ev) => {
           // Blocks middle-click autoscroll. A block body, since returning false would cancel left
           // clicks too and stop tabs from being dragged.

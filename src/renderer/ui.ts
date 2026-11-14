@@ -12,7 +12,22 @@ export function h<K extends keyof HTMLElementTagNameMap>(
   return el
 }
 
-export type MenuItem = { label: string; run: () => void; danger?: boolean } | '-'
+// An item with `checked` shows a checkbox; clicking it flips the box and passes the new state to
+// `run`, leaving the menu open so several can be toggled in a row.
+export type MenuItem = { label: string; run: (checked: boolean) => void; danger?: boolean; checked?: boolean } | '-'
+
+function menuButton(menu: HTMLElement, i: Exclude<MenuItem, '-'>): HTMLButtonElement {
+  if (i.checked === undefined)
+    return h('button', { class: i.danger ? 'danger' : '', textContent: i.label, onclick: () => ((menu.hidden = true), i.run(false)) })
+  const box = h('input', { type: 'checkbox', checked: i.checked, tabIndex: -1 })
+  const b = h('button', { class: 'check' }, box, i.label)
+  b.onclick = (ev) => {
+    ev.stopPropagation() // the document click would close the menu
+    box.checked = !box.checked
+    i.run(box.checked)
+  }
+  return b
+}
 
 let menuEl: HTMLDivElement | undefined
 
@@ -31,11 +46,7 @@ export function showMenu(ev: MouseEvent, items: MenuItem[]): void {
   ev.preventDefault()
   ev.stopPropagation()
   const menu = getMenu()
-  menu.replaceChildren(
-    ...items.map((i) =>
-      i === '-' ? h('hr') : h('button', { class: i.danger ? 'danger' : '', textContent: i.label, onclick: () => ((menu.hidden = true), i.run()) })
-    )
-  )
+  menu.replaceChildren(...items.map((i) => (i === '-' ? h('hr') : menuButton(menu, i))))
   menu.hidden = false
   // Keep it on screen.
   const { innerWidth: w, innerHeight: ht } = window

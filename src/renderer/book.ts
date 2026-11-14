@@ -316,27 +316,51 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
 const icons = {
   details: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/><path d="M9 7h7M9 11h5"/></svg>',
   image: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></svg>',
+  characters: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  extras: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M17.5 14v7M14 17.5h7"/></svg>',
   folder: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>'
 }
 
-// A view the sidebar can show, picked from the ribbon. `shown` runs each time it's shown.
-type Panel = { id: string; title: string; icon: string; el: HTMLElement; shown?: () => void }
+// A view the sidebar can show, picked from the ribbon. `shown` runs each time it's shown. An
+// `optional` panel's button is only on the ribbon once turned on in the ribbon's extras menu.
+type Panel = { id: string; title: string; icon: string; el: HTMLElement; shown?: () => void; optional?: boolean }
 
 // The ribbon: a narrow column of buttons, one per sidebar panel. A button shows its panel in the
-// sidebar; clicking the shown panel's button again collapses the sidebar. Remembered per book.
+// sidebar; clicking the shown panel's button again collapses the sidebar. Which panel is shown and
+// which optional panels are on are remembered per book.
 function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
   const key = `sidebar:${book}`
+  const extrasKey = `ribbon-extras:${book}`
+  const on = new Set<string>()
+  try {
+    const saved: unknown = JSON.parse(localStorage.getItem(extrasKey) ?? '[]')
+    if (Array.isArray(saved)) saved.forEach((id) => typeof id === 'string' && on.add(id))
+  } catch {}
+  const available = (id: string | null) => panels.some((p) => p.id === id && (!p.optional || on.has(id)))
   let shown: string | null = panels[0].id
   try {
     const saved = localStorage.getItem(key)
     if (saved === '') shown = null // collapsed
-    else if (panels.some((p) => p.id === saved)) shown = saved
+    else if (available(saved)) shown = saved
   } catch {}
   const buttons = panels.map((p) => {
-    const b = h('button', { class: 'icon', title: p.title, innerHTML: p.icon })
+    const b = h('button', { class: 'icon', title: p.title, innerHTML: p.icon, hidden: !available(p.id) })
     b.onclick = () => show(shown === p.id ? null : p.id)
     return b
   })
+  const toggle = (p: Panel, enabled: boolean) => {
+    if (enabled) on.add(p.id)
+    else on.delete(p.id)
+    try {
+      localStorage.setItem(extrasKey, JSON.stringify([...on]))
+    } catch {}
+    buttons[panels.indexOf(p)].hidden = !enabled
+    if (enabled) show(p.id)
+    else if (shown === p.id) show(panels[0].id)
+  }
+  const extras = h('button', { class: 'icon extras', title: 'More in the ribbon', innerHTML: icons.extras })
+  extras.onclick = (ev) =>
+    showMenu(ev, panels.filter((p) => p.optional).map((p) => ({ label: p.title, checked: on.has(p.id), run: (c: boolean) => toggle(p, c) })))
   const show = (id: string | null) => {
     shown = id
     panels.forEach((p, i) => {
@@ -353,6 +377,8 @@ function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
   show(shown)
   return {
     el: h('aside', { class: 'ribbon' }, ...buttons),
+    // The button that opens the optional-panels menu; the caller places it.
+    extras,
     // Shows the panel, leaving it open if it already is.
     reveal: (id: string) => shown !== id && show(id)
   }
@@ -388,10 +414,20 @@ export function showBook(root: HTMLElement, book: Book): void {
   })
   const ribbon = createRibbon(nav, book.id, [
     { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) },
-    { id: 'assets', title: 'Assets', icon: icons.image, el: assets.el, shown: assets.load }
+    { id: 'assets', title: 'Assets', icon: icons.image, el: assets.el, shown: assets.load },
+    {
+      id: 'characters',
+      title: 'Characters',
+      icon: icons.characters,
+      optional: true,
+      el: h('div', { class: 'panel characters' }, h('p', { class: 'empty-hint muted', textContent: 'No characters yet.' }))
+    }
   ])
-  ribbon.el.append(h('button', { class: 'icon', title: 'Details', innerHTML: icons.details, onclick: () => editor.details() }))
-  ribbon.el.append(h('button', { class: 'icon settings', textContent: '⚙', title: 'Settings', onclick: () => openSettings() }))
+  ribbon.el.append(
+    h('button', { class: 'icon', title: 'Details', innerHTML: icons.details, onclick: () => editor.details() }),
+    ribbon.extras,
+    h('button', { class: 'icon', textContent: '⚙', title: 'Settings', onclick: () => openSettings() })
+  )
   root.replaceChildren(ribbon.el, nav, main)
   const editor = createEditor(main, pane, crumbs, book.id, {
     openNote: (path, newTab) => explorer.open(path, newTab),

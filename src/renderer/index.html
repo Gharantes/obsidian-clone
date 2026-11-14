@@ -71,7 +71,8 @@
       .ribbon { width: 44px; display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0; box-sizing: border-box; border-right: 1px solid var(--line); background: var(--bg-2); }
       .ribbon button.icon { width: 32px; height: 32px; padding: 0; display: flex; align-items: center; justify-content: center; border-radius: 6px; }
       .ribbon button.on { background: var(--active); color: var(--fg); }
-      .ribbon .settings { margin-top: auto; }
+      .ribbon .extras { margin-top: auto; }
+      .book-view nav .characters .empty-hint { padding: 4px 12px; font-size: 13px; }
       .book-view nav { width: 260px; border-right: 1px solid var(--line); overflow: auto; background: var(--bg-2); display: flex; flex-direction: column; }
       .book-view nav .panel { flex: 1; display: flex; flex-direction: column; }
       .tree .empty-hint { padding: 4px 8px; font-size: 13px; }
@@ -221,6 +222,8 @@
       .menu button { border: 0; background: none; text-align: left; padding: 5px 12px; border-radius: 5px; }
       .menu button:hover { background: var(--hover); }
       .menu button.danger { color: var(--danger); }
+      .menu button.check { display: flex; align-items: center; gap: 8px; padding-left: 8px; }
+      .menu button.check input { margin: 0; pointer-events: none; }
       .menu hr { border: 0; border-top: 1px solid var(--line); margin: 4px 0; }
 
       .backdrop { position: fixed; inset: 0; background: #0006; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 16px 16px; z-index: 30; }

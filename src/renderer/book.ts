@@ -78,7 +78,7 @@ function textMenu(book: string) {
 }
 
 // The open tabs and the active one's note in one editor. Edits autosave 500 ms after the last change, and when another note or tab is shown.
-function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement, book: string, o: EditorOpts) {
+function createEditor(main: HTMLElement, pane: HTMLElement, book: string, o: EditorOpts) {
   let tabs: Tab[] = []
   let active: Tab | null = null
   // The note shown and saved; null while a tab is loading.
@@ -140,15 +140,6 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     saveTabs(book, tabs.map((t) => t.path), i)
   }
 
-  // "Chapter 1 / Scene" for "Chapter 1/Scene.md", and an image as its path in the Assets
-  // ("Maps / Map.png").
-  const showCrumbs = () => {
-    const path = active?.path ?? null
-    const image = imageName(path)
-    const parts = path && PAGE_TABS[path] ? [PAGE_TABS[path]] : image ? image.split('/') : path ? path.replace(/\.md$/, '').split('/') : []
-    crumbs.replaceChildren(...parts.flatMap((p, i) => [...(i ? [h('span', { class: 'sep', textContent: '/' })] : []), h('span', { textContent: p })]))
-  }
-
   // Saves the shown note and remembers where it was, before another note or tab is shown.
   function leave() {
     ai.settle()
@@ -165,7 +156,6 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     const tab = active
     const path = tab?.path ?? null
     redraw()
-    showCrumbs()
     o.selected(path)
     main.classList.toggle('empty', !path)
     const n = ++loads
@@ -281,7 +271,6 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       for (const t of tabs) if (t.path) t.path = movePath(t.path, from, to)
       if (current) current = movePath(current, from, to)
       redraw()
-      showCrumbs()
     },
     deleted,
     // Saves pending edits now, before notes are changed behind the editor's back.
@@ -307,6 +296,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
 }
 
 const icons = {
+  ai: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.94 15.5A2 2 0 0 0 8.5 14.06l-6.13-1.58a.5.5 0 0 1 0-.96L8.5 9.94A2 2 0 0 0 9.94 8.5l1.58-6.13a.5.5 0 0 1 .96 0l1.58 6.13a2 2 0 0 0 1.44 1.44l6.13 1.58a.5.5 0 0 1 0 .96l-6.13 1.58a2 2 0 0 0-1.44 1.44l-1.58 6.13a.5.5 0 0 1-.96 0Z"/><path d="M20 3v4M22 5h-4"/></svg>',
   details: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H19a1 1 0 0 1 1 1v18a1 1 0 0 1-1 1H6.5a1 1 0 0 1 0-5H20"/><path d="M9 7h7M9 11h5"/></svg>',
   image: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.09-3.09a2 2 0 0 0-2.82 0L6 21"/></svg>',
   characters: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
@@ -422,9 +412,8 @@ export function showBook(root: HTMLElement, book: Book): void {
   document.title = book.title
   root.className = 'book-view'
   const tree = h('ul', { class: 'tree' })
-  const crumbs = h('div', { class: 'crumbs' })
   const pane = h('div', { class: 'editor' })
-  const aiButton = h('button', { class: 'ai-toggle', textContent: '✨ AI', title: 'Write with AI (Ctrl+J)' })
+  const aiButton = h('button', { class: 'icon ai-toggle', innerHTML: icons.ai, title: 'Write with AI (Ctrl+J)' })
   const newNote = h('button', { textContent: '+ Note', title: 'New note' })
   const newFolder = h('button', { textContent: '+ Folder', title: 'New folder' })
   const main = h('main', { class: 'empty no-tabs' })
@@ -455,11 +444,12 @@ export function showBook(root: HTMLElement, book: Book): void {
   })
   ribbon.el.prepend(h('button', { class: 'icon', textContent: '←', title: 'Back to library', onclick: () => api.books.close() }))
   ribbon.el.append(
+    aiButton,
     ribbon.extras,
     h('button', { class: 'icon', textContent: '⚙', title: 'Settings', onclick: () => openSettings() })
   )
   root.replaceChildren(ribbon.el, nav, main)
-  const editor = createEditor(main, pane, crumbs, book.id, {
+  const editor = createEditor(main, pane, book.id, {
     openNote: (path, newTab) => explorer.open(path, newTab),
     selected(path) {
       ribbon.tab(path)
@@ -481,7 +471,6 @@ export function showBook(root: HTMLElement, book: Book): void {
   })
   main.append(
     editor.bar,
-    h('header', { class: 'note-head' }, crumbs, aiButton),
     pane,
     h('div', { class: 'placeholder' },
       h('p', { textContent: 'No note is open' }),
@@ -496,6 +485,10 @@ export function showBook(root: HTMLElement, book: Book): void {
   root.append(editor.ai.panel)
   const explorer = createExplorer(tree, editor)
   aiButton.onclick = () => editor.ai.toggle()
+  // Lit while the AI sidebar is open, however it was opened or closed.
+  const lightAi = () => aiButton.classList.toggle('on', !editor.ai.panel.hidden)
+  new MutationObserver(lightAi).observe(editor.ai.panel, { attributes: true, attributeFilter: ['hidden'] })
+  lightAi()
   newNote.onclick = () => explorer.create(false)
   newFolder.onclick = () => explorer.create(true)
 

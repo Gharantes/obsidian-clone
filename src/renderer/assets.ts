@@ -340,9 +340,6 @@ export function createAssets(o: AssetsOpts) {
   }
 
   const actions = h('div', { class: 'actions' },
-    h('button', { textContent: '+ Images', title: 'Add image files', onclick: () => addImages('') }),
-    h('button', { textContent: '+ pixiv', title: 'Download an artwork from a pixiv link', onclick: () => addFromPixiv('') }),
-    h('button', { textContent: '+ Folder', title: 'New folder for images', onclick: () => newFolder('') }),
     h('button', { class: 'grid-view', innerHTML: GRID, title: 'Show all images in a grid', onclick: () => o.gallery() })
   )
   return { el: h('div', { class: 'panel' }, actions, list), load, select, menu }

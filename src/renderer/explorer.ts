@@ -64,7 +64,11 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
         if (e.note) expanded.add(e.path)
         if (target) openNote(target, ev.ctrlKey || ev.metaKey)
       }
-      row.onmousedown = (ev) => ev.button === 1 && ev.preventDefault()
+      row.onmousedown = (ev) => {
+        // Blocks middle-click autoscroll. A block body, since returning false would cancel left
+        // clicks too and stop rows from being dragged.
+        if (ev.button === 1) ev.preventDefault()
+      }
       row.onauxclick = (ev) => ev.button === 1 && target && openNote(target, true)
       row.oncontextmenu = (ev) => showMenu(ev, menuFor(e, row))
       row.draggable = true

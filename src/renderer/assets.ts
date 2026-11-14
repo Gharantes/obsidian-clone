@@ -58,7 +58,11 @@ export function createAssets(o: AssetsOpts) {
       const row = h('div', { class: 'row', title: name, draggable: true }, h('span', { textContent: name }))
       row.dataset.path = imageTab(name)
       row.onclick = (ev) => o.open(imageTab(name), ev.ctrlKey || ev.metaKey)
-      row.onmousedown = (ev) => ev.button === 1 && ev.preventDefault()
+      row.onmousedown = (ev) => {
+        // Blocks middle-click autoscroll. A block body, since returning false would cancel left
+        // clicks too and stop rows from being dragged.
+        if (ev.button === 1) ev.preventDefault()
+      }
       row.onauxclick = (ev) => ev.button === 1 && o.open(imageTab(name), true)
       row.oncontextmenu = (ev) => menu(ev, name)
       row.ondragstart = (ev) => {

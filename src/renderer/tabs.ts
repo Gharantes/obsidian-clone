@@ -60,7 +60,11 @@ export function createTabBar(o: Handlers) {
         const close = h('button', { textContent: '×', title: 'Close (Ctrl+W)', onclick: (ev: MouseEvent) => (ev.stopPropagation(), o.close(i)) })
         const tab = h('div', { class: `tab${i === active ? ' active' : ''}`, title: p ?? '', draggable: true }, h('span', { textContent: tabTitle(p) }), close)
         tab.onclick = () => o.select(i)
-        tab.onmousedown = (ev) => ev.button === 1 && ev.preventDefault()
+        tab.onmousedown = (ev) => {
+          // Blocks middle-click autoscroll. A block body, since returning false would cancel left
+          // clicks too and stop tabs from being dragged.
+          if (ev.button === 1) ev.preventDefault()
+        }
         tab.onauxclick = (ev) => ev.button === 1 && o.close(i)
         tab.oncontextmenu = (ev) =>
           showMenu(ev, [

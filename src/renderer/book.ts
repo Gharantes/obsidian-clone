@@ -8,12 +8,12 @@ import { createDetails, type DetailsOpts } from './details.ts'
 import { createExplorer, find, movePath } from './explorer.ts'
 import { livePreview } from './livePreview.ts'
 import { openSettings } from './settings.ts'
-import { createTabBar, DETAILS_TAB, imageName, imageTab, loadTabs, nextTab, saveTabs } from './tabs.ts'
+import { createTabBar, DETAILS_TAB, imageName, imageTab, loadTabs, nextTab, PAGE_TABS, saveTabs, TAGS_TAB } from './tabs.ts'
 import { h, showMenu } from './ui.ts'
 
 const { api } = window
 
-// An open tab: a note, an image (see imageTab), the book's Details page (DETAILS_TAB), or empty
+// An open tab: a note, an image (see imageTab), one of the book's pages (PAGE_TABS), or empty
 // (path null). While another tab is shown
 // it keeps the note's editor state (with its undo history) and scroll position.
 type Tab = { path: string | null; state?: EditorState; scroll?: StateEffect<unknown> }
@@ -85,7 +85,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
   let current: string | null = null
   let loads = 0
   let restored = false
-  // The image an image tab shows, in place of the editor.
+  // What an image tab or the Tags tab shows, in place of the editor.
   let image: HTMLElement | null = null
   // The Details tab's page, in place of the editor.
   let details: ReturnType<typeof createDetails> | null = null
@@ -145,7 +145,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
   const showCrumbs = () => {
     const path = active?.path ?? null
     const image = imageName(path)
-    const parts = path === DETAILS_TAB ? ['Details'] : image ? image.split('/') : path ? path.replace(/\.md$/, '').split('/') : []
+    const parts = path && PAGE_TABS[path] ? [PAGE_TABS[path]] : image ? image.split('/') : path ? path.replace(/\.md$/, '').split('/') : []
     crumbs.replaceChildren(...parts.flatMap((p, i) => [...(i ? [h('span', { class: 'sep', textContent: '/' })] : []), h('span', { textContent: p })]))
   }
 
@@ -175,6 +175,12 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       if (n !== loads || !b) return
       details = createDetails(b, o.details)
       pane.append(details.el)
+      return
+    }
+    if (path === TAGS_TAB) {
+      image = h('div', { class: 'details-page' }, h('h2', { textContent: 'Tags' }), h('p', { class: 'muted', textContent: 'No tags yet.' }))
+      pane.append(image)
+      view.dom.hidden = true
       return
     }
     const imagePath = imageName(path)
@@ -249,11 +255,11 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     ai,
     bar: bar.el,
     newTab: () => add(null),
-    // Shows the Details tab, opening it after the active tab if it isn't open.
-    details() {
-      const tab = tabs.find((t) => t.path === DETAILS_TAB)
+    // Shows a page tab (see PAGE_TABS), opening it after the active tab if it isn't open.
+    page(path: string) {
+      const tab = tabs.find((t) => t.path === path)
       if (tab) activate(tab)
-      else add(DETAILS_TAB)
+      else add(path)
     },
     closeTab: () => active && closeWhere((t) => t === active),
     // Shows the tab `by` places to the right (negative: left), wrapping around, and its panel in
@@ -285,7 +291,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       restored = true
       const saved = loadTabs(book)
       const all: Tab[] = saved.paths.map((path) => ({ path }))
-      const missing = (tab: Tab) => !!tab.path && tab.path !== DETAILS_TAB && !imageName(tab.path) && !find(t, tab.path)
+      const missing = (tab: Tab) => !!tab.path && !PAGE_TABS[tab.path] && !imageName(tab.path) && !find(t, tab.path)
       active = nextTab(all, all[saved.active] ?? null, missing)
       tabs = all.filter((tab) => !missing(tab))
       load()
@@ -305,9 +311,10 @@ const icons = {
   folder: '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13c0 1.1.9 2 2 2Z"/></svg>'
 }
 
-// A view the sidebar can show, picked from the ribbon. `shown` runs each time it's shown. An
+// A view the sidebar can show, picked from the ribbon. `shown` runs each time it's shown. One with
+// `open` instead of `el` is a button that opens something else (a tab), not a sidebar view. An
 // `optional` panel's button is only on the ribbon once turned on in the ribbon's extras menu.
-type Panel = { id: string; title: string; icon: string; el: HTMLElement; shown?: () => void; optional?: boolean }
+type Panel = { id: string; title: string; icon: string; shown?: () => void; optional?: boolean } & ({ el: HTMLElement } | { open: () => void })
 
 // The ribbon: a narrow column of buttons, one per sidebar panel. A button shows its panel in the
 // sidebar; clicking the shown panel's button again collapses the sidebar. Which panel is shown and
@@ -321,15 +328,16 @@ function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
     if (Array.isArray(saved)) saved.forEach((id) => typeof id === 'string' && on.add(id))
   } catch {}
   const available = (id: string | null) => panels.some((p) => p.id === id && (!p.optional || on.has(id)))
+  const views = panels.flatMap((p) => ('el' in p ? [p] : []))
   let shown: string | null = panels[0].id
   try {
     const saved = localStorage.getItem(key)
     if (saved === '') shown = null // collapsed
-    else if (available(saved)) shown = saved
+    else if (available(saved) && views.some((p) => p.id === saved)) shown = saved
   } catch {}
   const buttons = panels.map((p) => {
     const b = h('button', { class: 'icon', title: p.title, innerHTML: p.icon, hidden: !available(p.id) })
-    b.onclick = () => show(shown === p.id ? null : p.id)
+    b.onclick = () => ('open' in p ? p.open() : show(shown === p.id ? null : p.id))
     return b
   })
   const toggle = (p: Panel, enabled: boolean) => {
@@ -339,7 +347,7 @@ function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
       localStorage.setItem(extrasKey, JSON.stringify([...on]))
     } catch {}
     buttons[panels.indexOf(p)].hidden = !enabled
-    if (enabled) show(p.id)
+    if (enabled) 'open' in p ? p.open() : show(p.id)
     else if (shown === p.id) show(panels[0].id)
   }
   const extras = h('button', { class: 'icon extras', title: 'More in the ribbon', innerHTML: icons.extras })
@@ -348,7 +356,7 @@ function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
   const show = (id: string | null) => {
     shown = id
     panels.forEach((p, i) => {
-      p.el.hidden = p.id !== id
+      if ('el' in p) p.el.hidden = p.id !== id
       buttons[i].classList.toggle('on', p.id === id)
     })
     sidebar.hidden = !id
@@ -357,7 +365,7 @@ function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
       localStorage.setItem(key, id ?? '')
     } catch {}
   }
-  sidebar.append(...panels.map((p) => p.el))
+  sidebar.append(...views.map((p) => p.el))
   show(shown)
   return {
     el: h('aside', { class: 'ribbon' }, ...buttons),
@@ -409,10 +417,10 @@ export function showBook(root: HTMLElement, book: Book): void {
     placeholderPanel('locations', 'Locations', icons.locations),
     placeholderPanel('species', 'Species', icons.species),
     placeholderPanel('items', 'Items', icons.items),
-    placeholderPanel('tags', 'Tags', icons.tags)
+    { id: 'tags', title: 'Tags', icon: icons.tags, optional: true, open: () => editor.page(TAGS_TAB) }
   ])
   ribbon.el.append(
-    h('button', { class: 'icon', title: 'Details', innerHTML: icons.details, onclick: () => editor.details() }),
+    h('button', { class: 'icon', title: 'Details', innerHTML: icons.details, onclick: () => editor.page(DETAILS_TAB) }),
     ribbon.extras,
     h('button', { class: 'icon', textContent: '⚙', title: 'Settings', onclick: () => openSettings() })
   )

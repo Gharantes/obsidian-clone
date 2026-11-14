@@ -5,14 +5,17 @@ import { h, showMenu } from './ui.ts'
 const IMAGE = 'image:'
 export const imageTab = (path: string) => IMAGE + path
 export const imageName = (path: string | null) => (path?.startsWith(IMAGE) ? path.slice(IMAGE.length) : null)
-// The tab showing the book's Details page.
+// The tabs showing the book's Details page and its Tags page.
 export const DETAILS_TAB = 'details:'
+export const TAGS_TAB = 'tags:'
+// Tabs that show one of the book's pages rather than a note or image, by their titles.
+export const PAGE_TABS: Record<string, string> = { [DETAILS_TAB]: 'Details', [TAGS_TAB]: 'Tags' }
 
-// "Scene" for "Chapter 1/Scene.md"; an image tab is the image's
-// file name, the Details tab "Details" and a tab with no note "New tab".
+// "Scene" for "Chapter 1/Scene.md"; an image tab is the image's file name, a page tab its
+// page's title ("Details") and a tab with no note "New tab".
 export function tabTitle(path: string | null): string {
   if (!path) return 'New tab'
-  if (path === DETAILS_TAB) return 'Details'
+  if (PAGE_TABS[path]) return PAGE_TABS[path]
   const p = imageName(path) ?? path
   return p.slice(p.lastIndexOf('/') + 1).replace(/\.md$/, '')
 }

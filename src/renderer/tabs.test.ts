@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DETAILS_TAB, imageName, imageTab, nextTab, tabTitle } from './tabs.ts'
+import { DETAILS_TAB, imageName, imageTab, nextTab, TAGS_TAB, tabTitle } from './tabs.ts'
 
 test('tab titles', () => {
   assert.equal(tabTitle('Chapter 1/Scene.md'), 'Scene')
@@ -10,6 +10,7 @@ test('tab titles', () => {
   assert.equal(imageName(imageTab('Naruto/page1.PNG')), 'Naruto/page1.PNG')
   assert.equal(imageName('Map.md'), null)
   assert.equal(tabTitle(DETAILS_TAB), 'Details')
+  assert.equal(tabTitle(TAGS_TAB), 'Tags')
   assert.equal(imageName(DETAILS_TAB), null)
 })
 

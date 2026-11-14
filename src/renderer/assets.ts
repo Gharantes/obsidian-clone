@@ -205,6 +205,31 @@ export function createAssets(o: AssetsOpts) {
     load()
   }
 
+  // Asks for a pixiv link and downloads the artwork's images into folder/<artwork id>. The dialog
+  // stays open with the error when nothing came down; pages that failed alone are listed after.
+  async function addFromPixiv(folder: string) {
+    let added: { paths: string[]; error: string | null } | null = null
+    await ask('Add from pixiv', {
+      placeholder: 'https://www.pixiv.net/en/artworks/141886602',
+      hint: 'Downloads every page of the artwork into a folder named after its id. For R-18 works, add your pixiv session in Settings → pixiv.',
+      ok: 'Download',
+      busy: 'Downloading…',
+      check: async (v) => {
+        try {
+          added = await api.images.importPixiv(folder, v)
+          return null
+        } catch (e) {
+          return String(e)
+        }
+      }
+    })
+    if (!added) return
+    const { paths, error } = added as { paths: string[]; error: string | null }
+    if (error) alert(`Some pages weren't downloaded:\n${error}`)
+    if (paths.length) reveal(parentOf(paths[0]))
+    load()
+  }
+
   async function newFolder(parent: string) {
     const r = await ask('New folder', {
       placeholder: 'Folder name',
@@ -284,6 +309,7 @@ export function createAssets(o: AssetsOpts) {
 
   const folderMenu = (path: string): MenuItem[] => [
     { label: 'Add images…', run: () => addImages(path) },
+    { label: 'Add from pixiv…', run: () => addFromPixiv(path) },
     { label: 'New folder', run: () => newFolder(path) },
     '-',
     { label: 'Rename…', run: () => renameFolder(path) },
@@ -303,6 +329,7 @@ export function createAssets(o: AssetsOpts) {
   list.oncontextmenu = (ev) =>
     showMenu(ev, [
       { label: 'Add images…', run: () => addImages('') },
+      { label: 'Add from pixiv…', run: () => addFromPixiv('') },
       { label: 'New folder', run: () => newFolder('') }
     ])
   dropTarget(list, '')
@@ -314,6 +341,7 @@ export function createAssets(o: AssetsOpts) {
 
   const actions = h('div', { class: 'actions' },
     h('button', { textContent: '+ Images', title: 'Add image files', onclick: () => addImages('') }),
+    h('button', { textContent: '+ pixiv', title: 'Download an artwork from a pixiv link', onclick: () => addFromPixiv('') }),
     h('button', { textContent: '+ Folder', title: 'New folder for images', onclick: () => newFolder('') }),
     h('button', { class: 'grid-view', innerHTML: GRID, title: 'Show all images in a grid', onclick: () => o.gallery() })
   )

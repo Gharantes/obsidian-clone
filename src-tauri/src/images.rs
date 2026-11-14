@@ -63,6 +63,26 @@ pub fn import(db: &Connection, book: &str, folder: &str, file_name: &str, data: 
     Ok(join_rel(folder, &name))
 }
 
+// Adds downloaded images to `folder`/`sub` (made if missing) under their own names, skipping ones
+// already there, so importing the same pixiv artwork again doesn't duplicate it; returns the
+// images' paths, both new and already present.
+pub fn import_into(db: &Connection, book: &str, folder: &str, sub: &str, files: &[(String, Vec<u8>)]) -> Result<Vec<String>, String> {
+    if !folder_exists(db, book, folder)? {
+        return Err(format!("\"{folder}\" no longer exists"));
+    }
+    let dest = join_rel(folder, sub);
+    add_folder(db, book, &dest)?;
+    let mut paths = Vec::new();
+    for (name, data) in files {
+        let path = join_rel(&dest, name);
+        if get(db, book, &path)?.is_none() {
+            import(db, book, &dest, name, data)?;
+        }
+        paths.push(path);
+    }
+    Ok(paths)
+}
+
 // Image folders only organize images (no notes or sections); every folder's parent has a row too.
 pub fn add_folder(db: &Connection, book: &str, path: &str) -> Result<(), String> {
     let mut dir = path;
@@ -444,6 +464,18 @@ mod tests {
         assert_eq!(crate::books::list(db).unwrap()[0].cover, None, "the cover went with it");
         remove(db, "b", "photo.png").unwrap();
         assert_eq!(images(db), ["Map 1.png"]);
+    }
+
+    #[test]
+    fn imports_into_a_subfolder_once() {
+        let db = &crate::files::tests::test_db();
+        let files = [("1_p0.png".to_string(), b"\x89PNG".to_vec()), ("1_p1.jpg".to_string(), b"\xFF\xD8".to_vec())];
+        assert_eq!(import_into(db, "b", "", "1", &files).unwrap(), ["1/1_p0.png", "1/1_p1.jpg"]);
+        assert_eq!(import_into(db, "b", "", "1", &files).unwrap(), ["1/1_p0.png", "1/1_p1.jpg"], "no duplicates the second time");
+        assert_eq!(list(db, "b").unwrap().images.len(), 2);
+        create_folder(db, "b", "", "Art").unwrap();
+        assert_eq!(import_into(db, "b", "Art", "1", &files[..1]).unwrap(), ["Art/1/1_p0.png"]);
+        assert!(import_into(db, "b", "Nope", "1", &files).is_err());
     }
 
     #[test]

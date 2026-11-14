@@ -35,6 +35,10 @@ export type Settings = {
     openai: ApiConfig
     cloudflare: { accountId: string; apiToken: string }
   }
+  pixiv: {
+    // PHPSESSID cookie of a logged-in account, for R-18 works; empty downloads public works only.
+    session: string
+  }
 }
 
 type Moved = Promise<{ path: string } | { error: string }>
@@ -127,6 +131,9 @@ const images = {
   // Asks for image files and copies them into the folder, renaming any whose name the folder
   // already has; `error` lists any that weren't added.
   import: (folder: string): Promise<{ paths: string[]; error: string | null }> => invoke('image_import', { folder }),
+  // Downloads a pixiv artwork's images (link or id) into folder/<artwork id>, skipping ones already
+  // there; rejects with a message when nothing could be downloaded.
+  importPixiv: (folder: string, link: string): Promise<{ paths: string[]; error: string | null }> => invoke('image_import_pixiv', { folder, link }),
   remove: (path: string): Promise<string | null> => invoke('image_remove', { path }),
   // Renamed "Map 1.png"... when the folder already has an image with its name.
   move: (path: string, folder: string): Moved => invoke('image_move', { path, folder }),

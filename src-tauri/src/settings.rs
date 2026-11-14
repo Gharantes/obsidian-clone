@@ -9,6 +9,14 @@ use std::path::Path;
 pub struct Settings {
     pub ai: Ai,
     pub image: Image,
+    pub pixiv: Pixiv,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Pixiv {
+    // The PHPSESSID cookie of a logged-in pixiv account, for R-18 works; empty downloads public works only.
+    pub session: String,
 }
 
 #[derive(Serialize, Deserialize, Clone)]

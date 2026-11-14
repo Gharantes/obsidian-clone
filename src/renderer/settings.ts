@@ -255,6 +255,14 @@ export async function openSettings(): Promise<void> {
     h('p', { class: 'hint', textContent: 'Calls POST <base URL>/images/generations, e.g. `sd-server --listen-port 8080` from stable-diffusion.cpp.' })
   )
 
+  // pixiv: the session cookie that lets "Add from pixiv" download R-18 works.
+  const pixivSession = h('input', { type: 'password', value: s.pixiv.session, placeholder: 'Paste your PHPSESSID cookie' })
+  const pixivPage = [
+    h('p', { class: 'hint', textContent: 'Public works download without this. For R-18 works, log in at pixiv.net in your browser (with R-18 viewing turned on in your pixiv settings), open the developer tools (F12) → Application/Storage → Cookies → https://www.pixiv.net, and copy the value of PHPSESSID.' }),
+    field('Session', pixivSession),
+    h('p', { class: 'hint', textContent: "It works like your password for pixiv: it's stored only in this app's settings file and sent only to pixiv. Logging out of pixiv in the browser ends the session, and you'll need to paste a new one." })
+  ]
+
   const collect = (): Settings => ({
     ...s,
     ai: {
@@ -266,7 +274,8 @@ export async function openSettings(): Promise<void> {
       ...s.image,
       openai: { baseUrl: imageUrl.value.trim(), model: imageModel.value.trim(), apiKey: imageKey.value.trim() },
       cloudflare: { accountId: cfAccount.value.trim(), apiToken: cfToken.value.trim() }
-    }
+    },
+    pixiv: { session: pixivSession.value.trim() }
   })
 
   // Export: a book (the open one, in a book window) saved as a .zip of folders of .md files.
@@ -325,6 +334,7 @@ export async function openSettings(): Promise<void> {
   const pages: [string, Node[], string?][] = [
     ['AI Writing', [claude, ...apis.map((x) => x.el)], aiHint],
     ['AI Images', [pollinations, cloudflare, imageOpenai], aiHint],
+    ['pixiv', pixivPage],
     ['Export', exportPage],
     ['About', aboutPage]
   ]

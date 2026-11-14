@@ -77,10 +77,11 @@ export function modal(title: string, body: Node[], footer: HTMLElement[], onClos
 }
 
 // Asks for one line of text; resolves to the trimmed text, or null when cancelled.
-// `check` may return an error message to keep the dialog open.
+// `check` may return an error message to keep the dialog open; while it runs, the OK button shows
+// `busy` (when given) and can't be pressed again.
 export function ask(
   title: string,
-  opts: { value?: string; placeholder?: string; ok?: string; check?: (v: string) => Promise<string | null> } = {}
+  opts: { value?: string; placeholder?: string; ok?: string; busy?: string; hint?: string; check?: (v: string) => Promise<string | null> } = {}
 ): Promise<string | null> {
   return new Promise((resolve) => {
     const input = h('input', { value: opts.value ?? '', placeholder: opts.placeholder ?? '' })
@@ -88,15 +89,21 @@ export function ask(
     let result: string | null = null
     const submit = async () => {
       const v = input.value.trim()
-      if (!v) return
+      if (!v || ok.disabled) return
+      error.textContent = ''
+      ok.disabled = true
+      if (opts.busy) ok.textContent = opts.busy
       const err = opts.check ? await opts.check(v) : null
+      ok.disabled = false
+      ok.textContent = opts.ok ?? 'OK'
       if (err) return void (error.textContent = err)
       result = v
       dlg.close()
     }
     const ok = h('button', { class: 'primary', textContent: opts.ok ?? 'OK', onclick: submit })
     const cancel = h('button', { textContent: 'Cancel', onclick: () => dlg.close() })
-    const dlg = modal(title, [input, error], [cancel, ok], () => resolve(result))
+    const hint = opts.hint ? [h('p', { class: 'hint', textContent: opts.hint })] : []
+    const dlg = modal(title, [input, ...hint, error], [cancel, ok], () => resolve(result))
     input.onkeydown = (k) => {
       if (k.key === 'Enter') submit()
     }

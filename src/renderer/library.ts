@@ -73,7 +73,7 @@ export function generateCover(b: { id: string; title: string }): Promise<void> {
         status.textContent = r.error
         return
       }
-      await api.books.setCover(b.id, r.name)
+      await api.books.setCover(b.id, r.path)
       dlg.close()
     }
     const go = h('button', { class: 'primary', textContent: 'Generate', onclick: draw })

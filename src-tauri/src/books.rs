@@ -22,7 +22,7 @@ pub struct Book {
     pub color: String,
     pub ts: i64,
     pub notes: i64,
-    // Name of the cover image, if the book has one.
+    // Path of the cover image, if the book has one.
     pub cover: Option<String>,
     pub summary: String,
 }
@@ -39,11 +39,11 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
         CREATE TABLE IF NOT EXISTS entries (
             book TEXT NOT NULL REFERENCES books ON DELETE CASCADE, path TEXT NOT NULL, text TEXT, PRIMARY KEY (book, path)
         );
-        -- Images embedded in notes as ![[name]], and book covers. `folder` is a row of image_folders, or
-        -- '' for the top level.
+        -- Images embedded in notes as ![[folder/name]], and book covers. `folder` is a row of
+        -- image_folders, or '' for the top level.
         CREATE TABLE IF NOT EXISTS images (
             book TEXT NOT NULL REFERENCES books ON DELETE CASCADE, name TEXT NOT NULL, folder TEXT NOT NULL DEFAULT '', data BLOB NOT NULL,
-            PRIMARY KEY (book, name)
+            PRIMARY KEY (book, folder, name)
         );
         -- Folders that organize images, apart from the notes' folders; every folder's parent has a row.
         CREATE TABLE IF NOT EXISTS image_folders (
@@ -66,6 +66,26 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
     // And before image folders.
     if db.prepare("SELECT folder FROM images LIMIT 0").is_err() {
         db.execute_batch("ALTER TABLE images ADD COLUMN folder TEXT NOT NULL DEFAULT ''")?;
+    }
+    // And before images were known by path: names were unique across folders, and notes and covers
+    // named images without their folder.
+    let keyed: i64 = db.query_row("SELECT pk FROM pragma_table_info('images') WHERE name = 'folder'", [], |r| r.get(0))?;
+    if keyed == 0 {
+        let tx = db.unchecked_transaction()?;
+        tx.execute_batch(
+            "CREATE TABLE images_by_path (
+                book TEXT NOT NULL REFERENCES books ON DELETE CASCADE, name TEXT NOT NULL, folder TEXT NOT NULL DEFAULT '', data BLOB NOT NULL,
+                PRIMARY KEY (book, folder, name)
+            );
+            INSERT INTO images_by_path SELECT book, name, folder, data FROM images;
+            DROP TABLE images;
+            ALTER TABLE images_by_path RENAME TO images;",
+        )?;
+        let ids: Vec<String> = tx.prepare("SELECT id FROM books")?.query_map([], |r| r.get(0))?.collect::<rusqlite::Result<_>>()?;
+        for id in ids {
+            images::resolve_names(&tx, &id).map_err(|e| rusqlite::Error::ToSqlConversionFailure(e.into()))?;
+        }
+        tx.commit()?;
     }
     Ok(db)
 }
@@ -142,7 +162,7 @@ pub fn set_summary(db: &Connection, id: &str, summary: &str) -> Result<(), Strin
     Ok(())
 }
 
-// Sets the cover image (one of the book's images), or None for the plain color cover.
+// Sets the cover image (the path of one of the book's images), or None for the plain color cover.
 pub fn set_cover(db: &Connection, id: &str, name: Option<&str>) -> Result<(), String> {
     db.execute("UPDATE books SET cover = ?2 WHERE id = ?1", params![id, name]).map_err(err)?;
     Ok(())
@@ -169,7 +189,7 @@ fn attachments_folder(dir: &str) -> Option<&str> {
 #[derive(Default)]
 struct Meta {
     color: Option<String>,
-    // Cover image name.
+    // Cover image path (just its name in books exported before images were known by path).
     cover: Option<String>,
     summary: Option<String>,
 }
@@ -182,16 +202,20 @@ fn read_meta(meta: &str) -> Meta {
 
 // Creates a book from imported entries, adding any missing parent folders. Returns its id.
 // Images keep the folder they were in (see attachments_folder), and folders under attachments/
-// become image folders rather than notes' folders.
+// become image folders rather than notes' folders. Embeds that name an image without its folder
+// (as in Obsidian) are pointed at its path.
 fn import(db: &Connection, title: &str, Meta { color, cover, summary }: Meta, entries: Entries, imgs: Images) -> Result<String, String> {
     let tx = db.unchecked_transaction().map_err(err)?;
     let id = create(&tx, title, color.as_deref())?;
     set_summary(&tx, &id, summary.as_deref().unwrap_or(""))?;
+    let mut paths = Vec::new();
     for (path, data) in &imgs {
         let dir = parent_of(path);
-        images::add(&tx, &id, attachments_folder(dir).unwrap_or(dir), base_name(path), data)?;
+        let folder = attachments_folder(dir).unwrap_or(dir);
+        images::add(&tx, &id, folder, base_name(path), data)?;
+        paths.push(join_rel(folder, base_name(path)));
     }
-    if let Some(cover) = cover.filter(|c| imgs.iter().any(|(p, _)| base_name(p) == c)) {
+    if let Some(cover) = cover.filter(|c| paths.iter().any(|p| p == c || base_name(p) == c)) {
         set_cover(&tx, &id, Some(&cover))?;
     }
     let mut add = tx.prepare("INSERT OR IGNORE INTO entries (book, path, text) VALUES (?1, ?2, ?3)").map_err(err)?;
@@ -212,6 +236,7 @@ fn import(db: &Connection, title: &str, Meta { color, cover, summary }: Meta, en
         add.execute(params![id, path, text]).map_err(err)?;
     }
     drop(add);
+    images::resolve_names(&tx, &id)?;
     tx.commit().map_err(err)?;
     Ok(id)
 }
@@ -348,12 +373,14 @@ mod tests {
             fs::write(dir.join(f), f).unwrap();
         }
         fs::write(dir.join("Part 1/Map.png"), b"\x89PNG").unwrap();
+        fs::write(dir.join("Intro.md"), "![[Map.png]]").unwrap();
 
         let id = import_folder(db, &dir).unwrap();
         let book = list(db).unwrap().into_iter().find(|b| b.id == id).unwrap();
         assert_eq!((book.title.as_str(), book.color.as_str(), book.notes), ("Old Book", "#123456", 3), "skips other files and dot-files");
-        assert_eq!((book.cover.as_deref(), book.summary.as_str()), (Some("Map.png"), "Old tale."));
-        assert_eq!(images::get(db, &id, "Map.png").unwrap().as_deref(), Some(&b"\x89PNG"[..]), "images are keyed by file name");
+        assert_eq!(book.summary, "Old tale.");
+        assert_eq!(book.cover.as_deref(), Some("Part 1/Map.png"), "a cover named without its folder is pointed at its path");
+        assert_eq!(images::get(db, &id, "Part 1/Map.png").unwrap().as_deref(), Some(&b"\x89PNG"[..]), "images are known by path");
         assert_eq!(images::list(db, &id).unwrap().images, [("Map.png".into(), "Part 1".into())], "keeps the image's folder");
         images::create_folder(db, &id, "Part 1", "Empty").unwrap();
 
@@ -362,9 +389,11 @@ mod tests {
         let copy = import_zip(db, &zip).unwrap();
         assert_eq!(files::list_tree(db, &copy), files::list_tree(db, &id), "round-trips the tree");
         assert_eq!(files::read(db, &copy, "Part 1/Scenes/Scene.md").unwrap(), "Part 1/Scenes/Scene.md");
+        assert_eq!(files::read(db, &id, "Intro.md").unwrap(), "![[Part 1/Map.png]]", "Obsidian-style embeds get the folder");
+        assert_eq!(files::read(db, &copy, "Intro.md").unwrap(), "![[Part 1/Map.png]]");
         assert_eq!((title(db, &copy).unwrap().as_str(), get(db, &copy).unwrap().summary.as_str()), ("Old Book", "Old tale."));
         assert_eq!(images::all(db, &copy).unwrap(), images::all(db, &id).unwrap(), "round-trips images");
         assert_eq!(images::list(db, &copy).unwrap(), images::list(db, &id).unwrap(), "and their folders");
-        assert_eq!(list(db).unwrap().into_iter().find(|b| b.id == copy).unwrap().cover.as_deref(), Some("Map.png"));
+        assert_eq!(list(db).unwrap().into_iter().find(|b| b.id == copy).unwrap().cover.as_deref(), Some("Part 1/Map.png"));
     }
 }

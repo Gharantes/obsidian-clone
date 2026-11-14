@@ -6,7 +6,7 @@ import { stripMarkers } from './sections.ts'
 // Folders carry `note` when they have a folder note ("X/X.md"); that note is left out of `children`.
 export type Entry = { path: string; name: string; folder: boolean; note?: string; children?: Entry[] }
 
-// `cover` is the name of the book's cover image, if it has one.
+// `cover` is the path of the book's cover image (see images), if it has one.
 export type Book = { id: string; ts: number; title: string; notes: number; color: string; cover: string | null; summary: string }
 
 export type ApiConfig = { baseUrl: string; model: string; apiKey: string }
@@ -109,28 +109,33 @@ async function generate(id: string, req: AiRequest): Promise<string | null> {
   }
 }
 
-// Book images, embedded in notes as ![[name]]. Generating is cancelled with ai.cancel(id).
+// Book images, known by their path in the Assets folders ("Maps/Map.png", or "Map.png" at the top
+// level) and embedded in notes as ![[path]]. Names are unique within a folder only; moving or
+// renaming an image or folder updates the notes and cover that point at it.
 const images = {
-  generate: (id: string, prompt: string, width: number, height: number, book?: string): Promise<{ name: string } | { error: string }> =>
+  // Into the top level. Cancelled with ai.cancel(id).
+  generate: (id: string, prompt: string, width: number, height: number, book?: string): Promise<{ path: string } | { error: string }> =>
     invoke('image_generate', { id, prompt, width, height, book }),
   // `images` are [name, folder] pairs; '' is the top level.
   list: (): Promise<{ folders: string[]; images: [string, string][] }> => invoke('image_list'),
-  // Asks for image files and copies them into the folder; `error` lists any that weren't added.
-  import: (folder: string): Promise<{ names: string[]; error: string | null }> => invoke('image_import', { folder }),
-  remove: (name: string): Promise<string | null> => invoke('image_remove', { name }),
-  move: (name: string, folder: string): Promise<string | null> => invoke('image_move', { name, folder }),
+  // Asks for image files and copies them into the folder, renaming any whose name the folder
+  // already has; `error` lists any that weren't added.
+  import: (folder: string): Promise<{ paths: string[]; error: string | null }> => invoke('image_import', { folder }),
+  remove: (path: string): Promise<string | null> => invoke('image_remove', { path }),
+  // Renamed "Map 1.png"... when the folder already has an image with its name.
+  move: (path: string, folder: string): Moved => invoke('image_move', { path, folder }),
   // Folders only organize images; they hold no notes. Deleting one deletes its images and
-  // resolves to their names.
+  // resolves to their paths.
   folders: {
     create: (parent: string, name: string): Moved => invoke('image_folder_create', { parent, name }),
     move: (path: string, parent: string, name: string): Moved => invoke('image_folder_move', { path, parent, name }),
     remove: (path: string): Promise<string[]> => invoke('image_folder_remove', { path })
   },
-  // Keeps the extension when the new name has none; notes embedding the image are updated.
-  rename: (name: string, newName: string): Promise<{ name: string } | { error: string }> => invoke('image_rename', { name, newName }),
+  // Renames within its folder, keeping the extension when the new name has none.
+  rename: (path: string, newName: string): Moved => invoke('image_rename', { path, newName }),
   // Asks where to save a copy; resolves to an error message, or null.
-  save: (name: string): Promise<string | null> => invoke('image_save', { name }),
-  url: (book: string, name: string) => convertFileSrc(`${book}/${name}`, 'img')
+  save: (path: string): Promise<string | null> => invoke('image_save', { path }),
+  url: (book: string, path: string) => convertFileSrc(`${book}/${path}`, 'img')
 }
 
 export const api = {

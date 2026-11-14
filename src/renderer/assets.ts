@@ -7,41 +7,44 @@ const { api } = window
 type AssetsOpts = {
   // Opens an image tab (see imageTab).
   open(path: string, newTab: boolean): void
-  // Saves the editor's pending edits, before a rename changes the notes that embed the image.
+  // Saves the editor's pending edits, before a move or rename changes the notes that embed images.
   flush(): void
-  // Called after an image is renamed, with its old and new names.
+  // Called after an image or image folder moved or was renamed, with its old and new paths; the
+  // notes that embed its images were updated.
   renamed(from: string, to: string): void
-  // Called with the names of deleted images.
-  deleted(names: string[]): void
+  // Called with the paths of deleted images.
+  deleted(paths: string[]): void
 }
 
-// What's being dragged in the list: an image (by name) or a folder (by path).
+// What's being dragged in the list: an image or a folder, by path.
 type Dragged = { image: string } | { folder: string }
 
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 const under = (p: string, folder: string) => p === folder || p.startsWith(folder + '/')
+// An image's path (see api.images) from its name and folder.
+export const imagePath = (name: string, folder: string) => (folder ? `${folder}/${name}` : name)
 
-// Picks one of the book's images in a dialog, filtered by typing part of its name or folder;
-// resolves to its name, or null when cancelled.
+// Picks one of the book's images in a dialog, filtered by typing part of its path; resolves to
+// its path, or null when cancelled.
 export async function pickImage(book: string, title: string, current: string | null = null): Promise<string | null> {
   const { images } = await api.images.list().catch(() => ({ images: [] as [string, string][] }))
   return new Promise((resolve) => {
     let chosen: string | null = null
-    const pick = (name: string) => {
-      chosen = name
+    const pick = (path: string) => {
+      chosen = path
       dlg.close()
     }
     const buttons = images.map(([name, folder]) => {
-      const label = folder ? `${folder}/${name}` : name
-      const b = h('button', { class: name === current ? 'on' : '', title: label, onclick: () => pick(name) },
-        h('img', { src: api.images.url(book, name), alt: name, loading: 'lazy' })
+      const path = imagePath(name, folder)
+      const b = h('button', { class: path === current ? 'on' : '', title: path, onclick: () => pick(path) },
+        h('img', { src: api.images.url(book, path), alt: name, loading: 'lazy' })
       )
-      b.dataset.label = label.toLowerCase()
+      b.dataset.label = path.toLowerCase()
       return b
     })
     const grid = h('div', { class: 'image-grid' }, ...buttons)
     const none = h('p', { class: 'muted', textContent: 'No image matches.', hidden: true })
-    const filter = h('input', { placeholder: 'Filter by name', spellcheck: false })
+    const filter = h('input', { placeholder: 'Filter by name or folder', spellcheck: false })
     filter.oninput = () => {
       const q = filter.value.trim().toLowerCase()
       for (const b of buttons) b.hidden = !b.dataset.label!.includes(q)
@@ -92,21 +95,22 @@ export function createAssets(o: AssetsOpts) {
       return h('li', {}, row, ...(open ? [h('ul', {}, ...render(path))] : []))
     })
     const files = images.filter(([, f]) => f === folder).map(([name]) => {
-      const row = h('div', { class: 'row', title: name, draggable: true }, h('span', { textContent: name }))
-      row.dataset.path = imageTab(name)
-      row.onclick = (ev) => o.open(imageTab(name), ev.ctrlKey || ev.metaKey)
+      const path = imagePath(name, folder)
+      const row = h('div', { class: 'row', title: path, draggable: true }, h('span', { textContent: name }))
+      row.dataset.path = imageTab(path)
+      row.onclick = (ev) => o.open(imageTab(path), ev.ctrlKey || ev.metaKey)
       row.onmousedown = (ev) => {
         // Blocks middle-click autoscroll. A block body, since returning false would cancel left
         // clicks too and stop rows from being dragged.
         if (ev.button === 1) ev.preventDefault()
       }
-      row.onauxclick = (ev) => ev.button === 1 && o.open(imageTab(name), true)
-      row.oncontextmenu = (ev) => menu(ev, name)
+      row.onauxclick = (ev) => ev.button === 1 && o.open(imageTab(path), true)
+      row.oncontextmenu = (ev) => menu(ev, path)
       row.ondragstart = (ev) => {
-        dragging = { image: name }
+        dragging = { image: path }
         ev.dataTransfer!.effectAllowed = 'copyMove'
         // Dropped into a note, it becomes an embed.
-        ev.dataTransfer!.setData('text/plain', `![[${name}]]`)
+        ev.dataTransfer!.setData('text/plain', `![[${path}]]`)
       }
       row.ondragend = () => (dragging = null)
       dropTarget(row, folder)
@@ -119,7 +123,7 @@ export function createAssets(o: AssetsOpts) {
   function dropTarget(el: HTMLElement, dest: string) {
     const ok = () => {
       if (!dragging) return false
-      if ('image' in dragging) return images.find(([n]) => n === (dragging as { image: string }).image)?.[1] !== dest
+      if ('image' in dragging) return parentOf(dragging.image) !== dest
       return parentOf(dragging.folder) !== dest && !under(dest, dragging.folder)
     }
     el.ondragover = (ev) => {
@@ -168,14 +172,15 @@ export function createAssets(o: AssetsOpts) {
     for (let p = folder; p; p = parentOf(p)) expanded.add(p)
   }
 
+  // Moving changes the notes that embed the moved images.
   async function move(d: Dragged, dest: string) {
-    if ('image' in d) {
-      const err = await api.images.move(d.image, dest)
-      if (err) alert(err)
-    } else {
-      const r = await api.images.folders.move(d.folder, dest, baseName(d.folder))
-      if ('error' in r) alert(r.error)
-      else moved(d.folder, r.path)
+    o.flush()
+    const from = 'image' in d ? d.image : d.folder
+    const r = 'image' in d ? await api.images.move(d.image, dest) : await api.images.folders.move(d.folder, dest, baseName(d.folder))
+    if ('error' in r) alert(r.error)
+    else {
+      if ('folder' in d) moved(d.folder, r.path)
+      o.renamed(from, r.path)
     }
     reveal(dest)
     load()
@@ -213,14 +218,16 @@ export function createAssets(o: AssetsOpts) {
       value: baseName(path),
       ok: 'Rename',
       check: async (v) => {
+        o.flush()
         const r = await api.images.folders.move(path, parentOf(path), v)
         if ('error' in r) return r.error
         to = r.path
         return null
       }
     })
-    if (!to) return
+    if (!to || to === path) return
     moved(path, to)
+    o.renamed(path, to)
     load()
   }
 
@@ -228,41 +235,41 @@ export function createAssets(o: AssetsOpts) {
     const n = images.filter(([, f]) => under(f, path)).length
     const what = n ? ` and the ${n === 1 ? 'image' : `${n} images`} in it` : ''
     if (!confirm(`Delete the folder "${baseName(path)}"${what}? This can't be undone.`)) return
-    const names = await api.images.folders.remove(path)
+    const paths = await api.images.folders.remove(path)
     expanded.delete(path)
-    o.deleted(names)
+    o.deleted(paths)
     load()
   }
 
   // Renaming also updates the notes that embed the image.
-  async function rename(name: string) {
+  async function rename(path: string) {
     let to: string | null = null
     await ask('Rename image', {
-      value: name,
+      value: baseName(path),
       ok: 'Rename',
       check: async (v) => {
         o.flush()
-        const r = await api.images.rename(name, v)
+        const r = await api.images.rename(path, v)
         if ('error' in r) return r.error
-        to = r.name
+        to = r.path
         return null
       }
     })
-    if (!to || to === name) return
-    o.renamed(name, to)
+    if (!to || to === path) return
+    o.renamed(path, to)
     load()
   }
 
-  async function remove(name: string) {
-    if (!confirm(`Delete "${name}"? Notes that embed it will show a broken image. This can't be undone.`)) return
-    const err = await api.images.remove(name)
+  async function remove(path: string) {
+    if (!confirm(`Delete "${baseName(path)}"? Notes that embed it will show a broken image. This can't be undone.`)) return
+    const err = await api.images.remove(path)
     if (err) return alert(err)
-    o.deleted([name])
+    o.deleted([path])
     load()
   }
 
-  async function download(name: string) {
-    const err = await api.images.save(name)
+  async function download(path: string) {
+    const err = await api.images.save(path)
     if (err) {
       const dlg = modal('Download failed', [h('p', { class: 'error', textContent: err })], [h('button', { textContent: 'OK', onclick: () => dlg.close() })])
     }
@@ -276,14 +283,14 @@ export function createAssets(o: AssetsOpts) {
     { label: 'Delete', danger: true, run: () => removeFolder(path) }
   ]
 
-  // An image's actions; also shown on right-click in its tab.
-  const menu = (ev: MouseEvent, name: string) =>
+  // An image's actions, by its path; also shown on right-click in its tab.
+  const menu = (ev: MouseEvent, path: string) =>
     showMenu(ev, [
-      { label: 'Open in new tab', run: () => o.open(imageTab(name), true) },
+      { label: 'Open in new tab', run: () => o.open(imageTab(path), true) },
       '-',
-      { label: 'Rename…', run: () => rename(name) },
-      { label: 'Download…', run: () => download(name) },
-      { label: 'Delete', danger: true, run: () => remove(name) }
+      { label: 'Rename…', run: () => rename(path) },
+      { label: 'Download…', run: () => download(path) },
+      { label: 'Delete', danger: true, run: () => remove(path) }
     ])
 
   list.oncontextmenu = (ev) =>

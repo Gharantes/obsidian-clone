@@ -351,33 +351,34 @@ fn image_list(state: AppState, window: WebviewWindow) -> Result<images::Listing,
     in_book(&state, &window, images::list)?
 }
 
-// Copies image files the user picks into a folder; resolves to { names, error }, `error` listing
+// Copies image files the user picks into a folder; resolves to { paths, error }, `error` listing
 // the files that weren't added (null when all were).
 #[tauri::command]
 async fn image_import(app: AppHandle, window: WebviewWindow, folder: String) -> Result<Value, String> {
     let picked = window.dialog().file().set_parent(&window).add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp"]).blocking_pick_files().unwrap_or_default();
-    let (mut names, mut errors) = (Vec::new(), Vec::new());
+    let (mut paths, mut errors) = (Vec::new(), Vec::new());
     for file in picked.into_iter().filter_map(|f| f.into_path().ok()) {
         let file_name = file.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
         let added = std::fs::read(&file)
             .map_err(|e| format!("\"{file_name}\": {e}"))
             .and_then(|data| in_book(&app.state::<Mutex<App>>(), &window, |db, b| images::import(db, b, &folder, &file_name, &data))?);
         match added {
-            Ok(name) => names.push(name),
+            Ok(path) => paths.push(path),
             Err(e) => errors.push(e),
         }
     }
-    Ok(json!({ "names": names, "error": (!errors.is_empty()).then(|| errors.join("\n")) }))
+    Ok(json!({ "paths": paths, "error": (!errors.is_empty()).then(|| errors.join("\n")) }))
 }
 
 #[tauri::command]
-fn image_remove(state: AppState, window: WebviewWindow, name: String) -> Result<Option<String>, String> {
-    in_book(&state, &window, |db, b| images::remove(db, b, &name).err())
+fn image_remove(state: AppState, window: WebviewWindow, path: String) -> Result<Option<String>, String> {
+    in_book(&state, &window, |db, b| images::remove(db, b, &path).err())
 }
 
+// Moves an image into a folder; resolves to { path } (its new path) or { error }.
 #[tauri::command]
-fn image_move(state: AppState, window: WebviewWindow, name: String, folder: String) -> Result<Option<String>, String> {
-    in_book(&state, &window, |db, b| images::move_to(db, b, &name, &folder).err())
+fn image_move(state: AppState, window: WebviewWindow, path: String, folder: String) -> Result<Value, String> {
+    in_book(&state, &window, |db, b| moved(images::move_to(db, b, &path, &folder)))
 }
 
 #[tauri::command]
@@ -391,35 +392,35 @@ fn image_folder_move(state: AppState, window: WebviewWindow, path: String, paren
     in_book(&state, &window, |db, b| moved(images::move_folder(db, b, Some(&path), &parent, &name)))
 }
 
-// Deletes an image folder and everything in it; resolves to the deleted images' names.
+// Deletes an image folder and everything in it; resolves to the deleted images' paths.
 #[tauri::command]
 fn image_folder_remove(state: AppState, window: WebviewWindow, path: String) -> Result<Vec<String>, String> {
     in_book(&state, &window, |db, b| images::remove_folder(db, b, &path))?
 }
 
+// Renames an image within its folder; resolves to { path } (its new path) or { error }.
 #[tauri::command]
-fn image_rename(state: AppState, window: WebviewWindow, name: String, new_name: String) -> Result<Value, String> {
-    in_book(&state, &window, |db, b| match images::rename(db, b, &name, &new_name) {
-        Ok(name) => json!({ "name": name }),
-        Err(e) => json!({ "error": e }),
-    })
+fn image_rename(state: AppState, window: WebviewWindow, path: String, new_name: String) -> Result<Value, String> {
+    in_book(&state, &window, |db, b| moved(images::rename(db, b, &path, &new_name)))
 }
 
 // Saves a copy of an image where the user picks; returns an error message, if any.
 #[tauri::command]
-async fn image_save(app: AppHandle, window: WebviewWindow, name: String) -> Option<String> {
-    let data = in_book(&app.state::<Mutex<App>>(), &window, |db, b| images::get(db, b, &name));
+async fn image_save(app: AppHandle, window: WebviewWindow, path: String) -> Option<String> {
+    let data = in_book(&app.state::<Mutex<App>>(), &window, |db, b| images::get(db, b, &path));
     let data = match data {
         Ok(Ok(Some(d))) => d,
-        Ok(Ok(None)) => return Some(format!("\"{name}\" no longer exists")),
+        Ok(Ok(None)) => return Some(format!("\"{path}\" no longer exists")),
         Ok(Err(e)) | Err(e) => return Some(e),
     };
+    let name = files::base_name(&path);
     let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
-    let file = window.dialog().file().set_parent(&window).set_file_name(&name).add_filter("Image", &[ext]).blocking_save_file()?.into_path().ok()?;
+    let file = window.dialog().file().set_parent(&window).set_file_name(name).add_filter("Image", &[ext]).blocking_save_file()?.into_path().ok()?;
     std::fs::write(file, data).err().map(|e| e.to_string())
 }
 
-// Generates an image into a book (the window's book when `book` is None); resolves to { name } or { error }.
+// Generates an image into the top level of a book's images (the window's book when `book` is
+// None); resolves to { path } or { error }.
 // Cancelled with ai_cancel, like text.
 #[tauri::command]
 async fn image_generate(app: AppHandle, window: WebviewWindow, id: String, prompt: String, width: u32, height: u32, book: Option<String>) -> Value {
@@ -439,7 +440,7 @@ async fn image_generate(app: AppHandle, window: WebviewWindow, id: String, promp
     };
     app.state::<Mutex<App>>().lock().unwrap().jobs.remove(&id);
     match r {
-        Ok(name) => json!({ "name": name }),
+        Ok(path) => json!({ "path": path }),
         Err(error) => json!({ "error": error }),
     }
 }
@@ -499,7 +500,7 @@ fn main() {
             ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_list, image_import, image_remove, image_move, image_folder_create, image_folder_move, image_folder_remove, image_rename, image_save,
             image_generate
         ])
-        // Serves book images at img://localhost/<book id>%2F<name> (see convertFileSrc in the renderer).
+        // Serves book images at img://localhost/<book id>%2F<image path> (see convertFileSrc in the renderer).
         .register_uri_scheme_protocol("img", |ctx, req| {
             let path = percent_encoding::percent_decode_str(req.uri().path().trim_start_matches('/')).decode_utf8_lossy().into_owned();
             let data = path.split_once('/').and_then(|(book, name)| {

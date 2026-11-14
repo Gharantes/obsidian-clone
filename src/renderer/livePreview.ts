@@ -12,10 +12,10 @@ const HIDE: Record<string, (parent: string) => boolean> = {
   QuoteMark: () => true
 }
 
-// Obsidian image embeds: ![[name.png]] or ![[name.png|alt]].
+// Obsidian image embeds by the image's path in the Assets: ![[Maps/name.png]] or ![[name.png|alt]].
 const EMBED = /!\[\[([^\]|#]+\.(?:png|jpe?g|gif|webp))(?:\|[^\]]*)?\]\]/gi
 
-// `name` is set on image spans: the embed is shown as that image.
+// `name` is set on image spans: the embed is shown as the image at that path.
 export type Span = { from: number; to: number; kind: 'hide' | 'quote' | 'image'; name?: string }
 
 // Ranges to hide (and quote lines to style) between from and to, given the current selection.
@@ -60,7 +60,7 @@ export function previewSpans(state: EditorState, from = 0, to = state.doc.length
   return spans
 }
 
-// How embedded images are shown: `url` maps an image name to its URL, and `open` opens the image
+// How embedded images are shown: `url` maps an image path to its URL, and `open` opens the image
 // in a new tab (on Ctrl+click or middle-click).
 export type Images = { url(name: string): string; open(name: string): void }
 

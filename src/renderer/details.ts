@@ -106,9 +106,9 @@ export function createDetails(initial: Book, o: DetailsOpts) {
 
   const upload = async () => {
     const r = await api.images.import('')
-    if (r.names.length) o.imagesChanged()
+    if (r.paths.length) o.imagesChanged()
     if (r.error) alert(r.error)
-    if (r.names[0]) await setCover(r.names[0])
+    if (r.paths[0]) await setCover(r.paths[0])
   }
   const choose = async () => {
     const name = await pickImage(book.id, 'Choose cover image', book.cover)

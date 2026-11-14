@@ -27,14 +27,15 @@ type EditorOpts = {
   selected(path: string | null): void
   // Rereads the file tree after notes changed outside the explorer.
   refresh(): void
-  // Right-click on an image tab's image.
-  imageMenu(ev: MouseEvent, name: string): void
+  // Right-click on an image tab's image, by the image's path.
+  imageMenu(ev: MouseEvent, path: string): void
   // For the Details tab's page.
   details: DetailsOpts
 }
 
 // Right-click in a note's text: Cut, Copy and Paste (it replaces the browser's own menu), and
-// Insert image…, which embeds a picked image as ![[name]] where the note was clicked.
+// Insert image…, which embeds a picked image by its path in the Assets (![[Maps/Map.png]]) where
+// the note was clicked.
 function textMenu(book: string) {
   return EditorView.domEventHandlers({
     contextmenu(ev, view) {
@@ -62,10 +63,10 @@ function textMenu(book: string) {
           async run() {
             // Inserted after any selected text rather than over it.
             const end = view.state.selection.main.to
-            const name = await pickImage(book, 'Insert image')
-            if (!name || !view.dom.isConnected) return
+            const path = await pickImage(book, 'Insert image')
+            if (!path || !view.dom.isConnected) return
             const at = Math.min(end, view.state.doc.length)
-            const embed = `![[${name}]]`
+            const embed = `![[${path}]]`
             view.dispatch({ changes: { from: at, insert: embed }, selection: { anchor: at + embed.length } })
             view.focus()
           }
@@ -115,7 +116,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
   const extensions = [
     basicSetup,
     markdown({ base: markdownLanguage }),
-    livePreview({ url: (name) => api.images.url(book, name), open: (name) => open(imageTab(name), true) }),
+    livePreview({ url: (path) => api.images.url(book, path), open: (path) => open(imageTab(path), true) }),
     ai.extension,
     textMenu(book),
     EditorView.lineWrapping,
@@ -143,11 +144,13 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     saveTabs(book, tabs.map((t) => t.path), i)
   }
 
-  // "Chapter 1 / Scene" for "Chapter 1/Scene.md"; a folder note shows as its folder.
+  // "Chapter 1 / Scene" for "Chapter 1/Scene.md"; a folder note shows as its folder, and an image
+  // as its path in the Assets ("Maps / Map.png").
   const showCrumbs = () => {
-    const name = active?.path === DETAILS_TAB ? 'Details' : imageName(active?.path ?? null)
-    const parts = name ? [name] : active?.path ? active.path.replace(/\.md$/, '').split('/') : []
-    if (parts.length > 1 && parts.at(-1) === parts.at(-2)) parts.pop()
+    const path = active?.path ?? null
+    const image = imageName(path)
+    const parts = path === DETAILS_TAB ? ['Details'] : image ? image.split('/') : path ? path.replace(/\.md$/, '').split('/') : []
+    if (!image && parts.length > 1 && parts.at(-1) === parts.at(-2)) parts.pop()
     crumbs.replaceChildren(...parts.flatMap((p, i) => [...(i ? [h('span', { class: 'sep', textContent: '/' })] : []), h('span', { textContent: p })]))
   }
 
@@ -183,10 +186,10 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       pane.append(details.el)
       return
     }
-    const name = imageName(path)
-    if (name) {
-      const img = h('img', { src: api.images.url(book, name), alt: name })
-      img.oncontextmenu = (ev) => o.imageMenu(ev, name)
+    const imagePath = imageName(path)
+    if (imagePath) {
+      const img = h('img', { src: api.images.url(book, imagePath), alt: imagePath })
+      img.oncontextmenu = (ev) => o.imageMenu(ev, imagePath)
       image = h('div', { class: 'image-view' }, img)
       pane.append(image)
       view.dom.hidden = true
@@ -370,7 +373,7 @@ export function showBook(root: HTMLElement, book: Book): void {
       editor.renamed(imageTab(from), imageTab(to))
       editor.reload() // its embeds may have changed
     },
-    deleted: (names) => names.forEach((n) => editor.deleted(imageTab(n)))
+    deleted: (paths) => paths.forEach((p) => editor.deleted(imageTab(p)))
   })
   const ribbon = createRibbon(nav, book.id, [
     { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) },
@@ -386,7 +389,7 @@ export function showBook(root: HTMLElement, book: Book): void {
       assets.select(path)
     },
     refresh: () => explorer.refresh(),
-    imageMenu: (ev, name) => assets.menu(ev, name),
+    imageMenu: (ev, path) => assets.menu(ev, path),
     details: {
       renamed(title) {
         document.title = bookTitle.textContent = title

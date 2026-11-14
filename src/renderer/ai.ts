@@ -241,7 +241,7 @@ export function createAi(o: Hooks) {
         if (!live()) return
         status('Drawing a picture…')
         const r = await window.api.images.generate(id, prompt.trim(), 1024, 768)
-        e.replace = e.replace.replace(tag, 'name' in r ? `![[${r.name}]]` : '')
+        e.replace = e.replace.replace(tag, 'path' in r ? `![[${r.path}]]` : '')
         if ('error' in r) note(`Picture not drawn: ${r.error}`, 'error')
       }
     }

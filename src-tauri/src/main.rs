@@ -193,7 +193,7 @@ fn book_summary(state: AppState, id: String, summary: String) -> Result<(), Stri
 }
 
 #[tauri::command]
-fn book_tags(state: AppState, id: String, tags: Vec<String>) -> Result<(), String> {
+fn book_tags(state: AppState, id: String, tags: Vec<books::Tag>) -> Result<(), String> {
     books::set_tags(&state.lock().unwrap().db, &id, &tags)
 }
 

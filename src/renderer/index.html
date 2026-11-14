@@ -99,6 +99,12 @@
       .tags-table td { padding: 0; border-bottom: 1px solid var(--line); }
       .tags-table td input { width: 100%; border: 0; border-radius: 0; background: none; padding: 8px 10px; }
       .tags-table tr:hover td { background: var(--hover); }
+      .tags-table .tag-color { width: 70px; padding: 0 10px; }
+      .tags-table .tag-delete { width: 44px; text-align: center; }
+      .tags-table .tag-delete button { padding: 4px 6px; display: inline-flex; }
+      .tags-table .tag-delete button:hover { color: var(--danger); }
+      .tag-swatch { width: 22px; height: 22px; border-radius: 50%; padding: 0; border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--line); vertical-align: middle; }
+      .tag-picker { position: fixed; z-index: 50; width: 170px; padding: 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; box-shadow: 0 6px 24px rgba(0,0,0,.25); }
       .tags-page > .muted { margin-top: 12px; }
       .tags-page .add-tag { margin-top: 12px; }
       @media (max-width: 760px) { .details-body { flex-direction: column; } }

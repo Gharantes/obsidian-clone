@@ -1,7 +1,7 @@
 use crate::files::{bad_name, base_name, err, join_rel, parent_of};
 use crate::images;
 use rusqlite::{params, Connection, OptionalExtension};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::fs::{self, File};
 use std::io::{Read, Write};
 use std::path::Path;
@@ -26,7 +26,27 @@ pub struct Book {
     pub cover: Option<String>,
     pub summary: String,
     // The Tags page's list, in the order it was made.
-    pub tags: Vec<String>,
+    pub tags: Vec<Tag>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
+pub struct Tag {
+    pub name: String,
+    // One of COVERS.
+    pub color: String,
+}
+
+// Reads a JSON list of tags. Tags saved before they had colors were plain names; those get the
+// palette's colors in turn.
+fn parse_tags(json: &serde_json::Value) -> Vec<Tag> {
+    let Some(list) = json.as_array() else { return Vec::new() };
+    list.iter()
+        .enumerate()
+        .filter_map(|(i, t)| match t.as_str() {
+            Some(name) => Some(Tag { name: name.into(), color: COVERS[i % COVERS.len()].into() }),
+            None => serde_json::from_value(t.clone()).ok(),
+        })
+        .collect()
 }
 
 // Opens the database holding every book and note, creating its tables if needed.
@@ -65,7 +85,7 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
     if db.prepare("SELECT summary FROM books LIMIT 0").is_err() {
         db.execute_batch("ALTER TABLE books ADD COLUMN summary TEXT NOT NULL DEFAULT ''")?;
     }
-    // And before tags (a JSON list of strings).
+    // And before tags (a JSON list; see parse_tags).
     if db.prepare("SELECT tags FROM books LIMIT 0").is_err() {
         db.execute_batch("ALTER TABLE books ADD COLUMN tags TEXT NOT NULL DEFAULT '[]'")?;
     }
@@ -138,7 +158,7 @@ pub fn random(n: u64) -> u64 {
 const SELECT_BOOK: &str = "SELECT id, title, color, ts, (SELECT count(*) FROM entries WHERE book = id AND text IS NOT NULL), cover, summary, tags FROM books";
 
 fn book_row(r: &rusqlite::Row) -> rusqlite::Result<Book> {
-    Ok(Book { id: r.get(0)?, title: r.get(1)?, color: r.get(2)?, ts: r.get(3)?, notes: r.get(4)?, cover: r.get(5)?, summary: r.get(6)?, tags: serde_json::from_str(&r.get::<_, String>(7)?).unwrap_or_default() })
+    Ok(Book { id: r.get(0)?, title: r.get(1)?, color: r.get(2)?, ts: r.get(3)?, notes: r.get(4)?, cover: r.get(5)?, summary: r.get(6)?, tags: parse_tags(&serde_json::from_str(&r.get::<_, String>(7)?).unwrap_or_default()) })
 }
 
 // Most recently opened first.
@@ -198,7 +218,7 @@ pub fn set_summary(db: &Connection, id: &str, summary: &str) -> Result<(), Strin
     Ok(())
 }
 
-pub fn set_tags(db: &Connection, id: &str, tags: &[String]) -> Result<(), String> {
+pub fn set_tags(db: &Connection, id: &str, tags: &[Tag]) -> Result<(), String> {
     db.execute("UPDATE books SET tags = ?2 WHERE id = ?1", params![id, serde_json::to_string(tags).map_err(err)?]).map_err(err)?;
     Ok(())
 }
@@ -233,13 +253,13 @@ struct Meta {
     // Cover image path (just its name in books exported before images were known by path).
     cover: Option<String>,
     summary: Option<String>,
-    tags: Vec<String>,
+    tags: Vec<Tag>,
 }
 
 fn read_meta(meta: &str) -> Meta {
     let json = serde_json::from_str::<serde_json::Value>(meta).unwrap_or_default();
     let get = |k: &str| json[k].as_str().map(String::from);
-    let tags = serde_json::from_value(json["tags"].clone()).unwrap_or_default();
+    let tags = parse_tags(&json["tags"]);
     Meta { color: get("color"), cover: get("cover"), summary: get("summary"), tags }
 }
 
@@ -397,8 +417,9 @@ mod tests {
         set_summary(db, &id, "A long tale.").unwrap();
         assert_eq!(get(db, &id).unwrap().summary, "A long tale.");
         assert!(get(db, &id).unwrap().tags.is_empty());
-        set_tags(db, &id, &["Hero".into(), "Villain".into()]).unwrap();
-        assert_eq!(get(db, &id).unwrap().tags, ["Hero", "Villain"]);
+        let tags = [Tag { name: "Hero".into(), color: "#30a46c".into() }, Tag { name: "Villain".into(), color: "#e5484d".into() }];
+        set_tags(db, &id, &tags).unwrap();
+        assert_eq!(get(db, &id).unwrap().tags, tags);
         set_open(db, &id, true).unwrap();
         assert_eq!(open_ids(db).unwrap(), [id.clone()]);
         files::write(db, &id, "Intro.md", "hi").unwrap();
@@ -444,7 +465,7 @@ mod tests {
         let db = &test_db();
         let dir = temp_dir().join("Old Book");
         fs::create_dir_all(dir.join("Part 1/Scenes")).unwrap();
-        fs::write(dir.join(META), r##"{"color":"#123456","cover":"Map.png","summary":"Old tale.","tags":["Magic"]}"##).unwrap();
+        fs::write(dir.join(META), r##"{"color":"#123456","cover":"Map.png","summary":"Old tale.","tags":["Magic",{"name":"War","color":"#0090ff"}]}"##).unwrap();
         for f in ["Part 1/Part 1.md", "Part 1/Scenes/Scene.md", "Intro.md", "notes.txt", ".hidden.md"] {
             fs::write(dir.join(f), f).unwrap();
         }
@@ -455,7 +476,8 @@ mod tests {
         let book = list(db).unwrap().into_iter().find(|b| b.id == id).unwrap();
         assert_eq!((book.title.as_str(), book.color.as_str(), book.notes), ("Old Book", "#123456", 3), "skips other files and dot-files");
         assert_eq!(book.summary, "Old tale.");
-        assert_eq!(book.tags, ["Magic"]);
+        let tags = [Tag { name: "Magic".into(), color: COVERS[0].into() }, Tag { name: "War".into(), color: "#0090ff".into() }];
+        assert_eq!(book.tags, tags, "plain names (tags saved before colors) get a palette color");
         assert_eq!(book.cover.as_deref(), Some("Part 1/Map.png"), "a cover named without its folder is pointed at its path");
         assert_eq!(images::get(db, &id, "Part 1/Map.png").unwrap().as_deref(), Some(&b"\x89PNG"[..]), "images are known by path");
         assert_eq!(images::list(db, &id).unwrap().images, [("Map.png".into(), "Part 1".into())], "keeps the image's folder");
@@ -469,7 +491,7 @@ mod tests {
         assert_eq!(files::read(db, &id, "Intro.md").unwrap(), "![[Part 1/Map.png]]", "Obsidian-style embeds get the folder");
         assert_eq!(files::read(db, &copy, "Intro.md").unwrap(), "![[Part 1/Map.png]]");
         assert_eq!((title(db, &copy).unwrap().as_str(), get(db, &copy).unwrap().summary.as_str()), ("Old Book", "Old tale."));
-        assert_eq!(get(db, &copy).unwrap().tags, ["Magic"], "round-trips tags");
+        assert_eq!(get(db, &copy).unwrap().tags, tags, "round-trips tags");
         assert_eq!(images::all(db, &copy).unwrap(), images::all(db, &id).unwrap(), "round-trips images");
         assert_eq!(images::list(db, &copy).unwrap(), images::list(db, &id).unwrap(), "and their folders");
         assert_eq!(list(db).unwrap().into_iter().find(|b| b.id == copy).unwrap().cover.as_deref(), Some("Part 1/Map.png"));

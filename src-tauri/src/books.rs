@@ -87,7 +87,37 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
         }
         tx.commit()?;
     }
+    // Folders used to come with a folder note ("A/A.md") that opened as a page of sections. Now
+    // folders only organize notes: the empty folder notes every folder got go, and those with text
+    // stay as ordinary notes, without the section marker lines.
+    if db.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))? < 1 {
+        let tx = db.unchecked_transaction()?;
+        let notes: Vec<(String, String, String)> = tx
+            .prepare("SELECT book, path, text FROM entries WHERE text IS NOT NULL")?
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?
+            .collect::<rusqlite::Result<_>>()?;
+        for (book, path, text) in notes {
+            let folder = parent_of(&path);
+            if folder.is_empty() || base_name(&path) != format!("{}.md", base_name(folder)) {
+                continue;
+            }
+            let text = strip_section_markers(&text);
+            if text.trim().is_empty() {
+                tx.execute("DELETE FROM entries WHERE book = ?1 AND path = ?2", params![book, path])?;
+            } else {
+                tx.execute("UPDATE entries SET text = ?3 WHERE book = ?1 AND path = ?2", params![book, path, text])?;
+            }
+        }
+        tx.execute_batch("PRAGMA user_version = 1")?;
+        tx.commit()?;
+    }
     Ok(db)
+}
+
+// A folder note's text without its "<!-- section: text -->" / "<!-- section: index -->" lines.
+fn strip_section_markers(text: &str) -> String {
+    let marker = |l: &str| l == "<!-- section: text -->" || l == "<!-- section: index -->";
+    text.split('\n').filter(|l| !marker(l)).collect::<Vec<_>>().join("\n").trim_start_matches('\n').to_string()
 }
 
 pub fn now_ms() -> i64 {
@@ -361,6 +391,35 @@ mod tests {
         remove(db, &id).unwrap();
         assert!(title(db, &id).is_err());
         assert!(files::read(db, &id, "Intro.md").is_err(), "notes go with the book");
+    }
+
+    #[test]
+    fn folder_notes_become_ordinary_notes() {
+        let file = temp_dir().join("db.sqlite");
+        {
+            let db = open_db(&file).unwrap();
+            db.execute("INSERT INTO books (id, title, color, ts) VALUES ('b', 'Book', '#000', 0)", []).unwrap();
+            for (path, text) in [
+                ("A", None),
+                ("A/A.md", Some("")),
+                ("B", None),
+                ("B/B.md", Some("<!-- section: text -->\nIntro\n<!-- section: index -->")),
+                ("B/Scene.md", Some("<!-- section: text -->")),
+                ("C.md", Some(""))
+            ] {
+                db.execute("INSERT INTO entries (book, path, text) VALUES ('b', ?1, ?2)", params![path, text]).unwrap();
+            }
+            db.execute_batch("PRAGMA user_version = 0").unwrap(); // as before the migration
+        }
+        let db = open_db(&file).unwrap();
+        assert!(files::read(&db, "b", "A/A.md").is_err(), "empty folder notes go");
+        assert_eq!(files::read(&db, "b", "B/B.md").unwrap(), "Intro", "others lose their section markers");
+        assert_eq!(files::read(&db, "b", "B/Scene.md").unwrap(), "<!-- section: text -->", "other notes are left alone");
+        assert_eq!(files::read(&db, "b", "C.md").unwrap(), "");
+        // It runs once: a note named like its folder made afterwards stays.
+        files::write(&db, "b", "A/A.md", "").unwrap();
+        drop(db);
+        assert!(files::read(&open_db(&file).unwrap(), "b", "A/A.md").is_ok());
     }
 
     #[test]

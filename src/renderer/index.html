@@ -135,26 +135,6 @@
       #app .cm-selectionBackground, #app .cm-focused .cm-selectionBackground { background: color-mix(in srgb, var(--accent) 28%, transparent); }
       #app .cm-ai-text { background: color-mix(in srgb, var(--accent) 14%, transparent); border-bottom: 1px dashed color-mix(in srgb, var(--accent) 60%, transparent); }
 
-      .folder-page { height: 100%; overflow: auto; box-sizing: border-box; padding: 18px 28px 60px; }
-      .folder-page .sections { display: flex; flex-direction: column; gap: 10px; }
-      .folder-page section { position: relative; border: 1px solid transparent; border-radius: 8px; padding: 6px 8px; }
-      .folder-page section:hover, .folder-page section:focus-within { border-color: var(--line); }
-      .folder-page .tools { position: absolute; top: 4px; right: 4px; display: flex; z-index: 2; background: var(--bg); border-radius: 6px; visibility: hidden; }
-      .folder-page section:hover .tools { visibility: visible; }
-      .folder-page .tools button { font-size: 13px; padding: 2px 7px; }
-      #app .folder-page .cm-editor { height: auto; }
-      #app .folder-page .cm-content { min-height: 1.65em; }
-      .folder-page h3 { margin: 2px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
-      .folder-page .index ul { list-style: none; margin: 0; padding: 0; }
-      .folder-page .index ul ul { padding-left: 14px; margin-left: 6px; border-left: 1px solid var(--line); }
-      .folder-page .index li > * { display: block; padding: 3px 6px; font-size: 15px; }
-      .folder-page .index li > button { border: 0; background: none; border-radius: 5px; text-align: left; width: 100%; }
-      .folder-page .index li > button:hover { background: var(--hover); color: var(--accent); }
-      .folder-page .index li.folder > * { font-weight: 600; }
-      .folder-page .index .muted { margin: 2px 6px; }
-      .folder-page > .muted { margin: 4px 8px 12px; }
-      .add-section { margin: 12px 8px 0; border-style: dashed; background: none; color: var(--muted); }
-      .add-section:hover { color: var(--accent); border-color: var(--accent); background: none; }
 
       .ai-panel { position: relative; width: 360px; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 8px 14px 14px; border-left: 1px solid var(--line); background: var(--bg-2); overflow: hidden; }
       .ai-panel .grip { position: absolute; inset: 0 auto 0 0; width: 5px; cursor: col-resize; }
@@ -206,7 +186,6 @@
       .row.active { background: var(--active); }
       .row.other { color: var(--muted); cursor: default; }
       .row.folder { padding-left: 4px; }
-      .row.has-note > span:last-child { text-decoration: underline; text-decoration-color: color-mix(in srgb, var(--accent) 50%, transparent); text-underline-offset: 3px; }
       .row .arrow { width: 18px; flex: none; text-align: center; color: var(--muted); font-size: 11px; }
       .row .arrow::before { content: '▸'; }
       .row.open .arrow::before { content: '▾'; }

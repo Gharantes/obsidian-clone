@@ -1,10 +1,9 @@
 import { convertFileSrc, invoke } from '@tauri-apps/api/core'
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow'
-import { buildPrompt, mentioned, outline, parentNotes, SYSTEM, type AiRequest, type Turn } from './prompt.ts'
-import { stripMarkers } from './sections.ts'
+import { buildPrompt, mentioned, outline, SYSTEM, type AiRequest, type Turn } from './prompt.ts'
 
-// Folders carry `note` when they have a folder note ("X/X.md"); that note is left out of `children`.
-export type Entry = { path: string; name: string; folder: boolean; note?: string; children?: Entry[] }
+// Folders only organize notes: they carry `children` and have no text of their own.
+export type Entry = { path: string; name: string; folder: boolean; children?: Entry[] }
 
 // `cover` is the path of the book's cover image (see images), if it has one.
 export type Book = { id: string; ts: number; title: string; notes: number; color: string; cover: string | null; summary: string }
@@ -65,7 +64,6 @@ const files = {
   // Creates a note with its text and any missing folders; `path` is the topmost entry made.
   createNote: (path: string, text: string): Moved => invoke('fs_create_note', { path, text }),
   rename: (path: string, name: string): Moved => invoke('fs_rename', { path, name }),
-  nest: (path: string): Moved => invoke('fs_nest', { path }),
   move: (path: string, dest: string): Moved => invoke('fs_move', { path, dest }),
   remove: (path: string): Promise<void> => invoke('fs_remove', { path })
 }
@@ -78,31 +76,22 @@ const chats = {
   remove: (id: string): Promise<void> => invoke('chat_remove', { id })
 }
 
-// Builds the prompt from the book (outline, parent folder notes, the notes the chat points at, most
-// recent first) and streams the reply as chunks.
+// Builds the prompt from the book (outline, the notes the chat points at, most recent first) and
+// streams the reply as chunks.
 async function generate(id: string, req: AiRequest): Promise<string | null> {
   try {
     const book = await books.current()
     if (!book) throw new Error('Window has no book')
-    const read = async (p: string) => {
-      const text = await files.read(p).catch(() => null)
-      return text === null ? null : stripMarkers(text)
-    }
-    const parents = []
-    for (const p of req.path ? parentNotes(req.path) : []) {
-      const text = await read(p)
-      if (text !== null) parents.push({ title: p.slice(p.lastIndexOf('/') + 1, -3), text })
-    }
     const tree = await files.list()
     const pointed = [req.instruction, ...[...req.history].reverse()].flatMap((t) => (typeof t === 'string' ? mentioned(t, tree) : t.role === 'user' ? mentioned(t.text, tree) : (t.notes ?? [])))
     const notes = []
     for (const p of new Set(pointed)) {
       if (p === req.path) continue
-      const text = await read(p)
+      const text = await files.read(p).catch(() => null)
       if (text !== null) notes.push({ path: p, text })
       if (notes.length === 6) break
     }
-    const prompt = buildPrompt({ ...req, book: book.title, outline: outline(tree, req.path), parents, notes })
+    const prompt = buildPrompt({ ...req, book: book.title, outline: outline(tree, req.path), notes })
     return await invoke('ai_generate', { id, prompt, system: SYSTEM })
   } catch (err) {
     return err instanceof Error ? err.message : String(err)

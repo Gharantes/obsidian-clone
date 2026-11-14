@@ -62,7 +62,7 @@ Tick each one only after you tried it in the running app.
 
 **Books & AI**
 - [x] Library grid as the main page (create / rename / recolor / delete books)
-- [x] Folder notes (folder `X` + note `X/X.md` act as one item; nest notes; drag to move)
+- [x] Folders that organize notes (nest folders; drag to move)
 - [x] AI writing with Claude Code (Ctrl+J chat sidebar that edits the note)
 - [x] OpenAI-compatible provider for free options (see `FREE_AI_OPTIONS.md`)
 - [ ] AI images: covers and `![[image]]` embeds in notes (free via Pollinations)

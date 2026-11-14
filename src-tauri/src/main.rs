@@ -242,11 +242,6 @@ fn fs_rename(state: AppState, window: WebviewWindow, path: String, name: String)
 }
 
 #[tauri::command]
-fn fs_nest(state: AppState, window: WebviewWindow, path: String) -> Result<Value, String> {
-    in_book(&state, &window, |db, b| moved(files::nest_note(db, b, &path)))
-}
-
-#[tauri::command]
 fn fs_move(state: AppState, window: WebviewWindow, path: String, dest: String) -> Result<Value, String> {
     in_book(&state, &window, |db, b| moved(files::move_entry(db, b, &path, &dest)))
 }
@@ -494,7 +489,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
             book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_summary, book_cover, book_remove,
-            fs_list, fs_read, fs_write, fs_rename, fs_nest, fs_move, fs_remove, fs_create, fs_create_note,
+            fs_list, fs_read, fs_write, fs_rename, fs_move, fs_remove, fs_create, fs_create_note,
             chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,
             ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_list, image_import, image_remove, image_move, image_folder_create, image_folder_move, image_folder_remove, image_rename, image_save,

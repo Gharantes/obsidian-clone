@@ -5,10 +5,8 @@ import type { Book, Entry } from './api.ts'
 import { createAi } from './ai.ts'
 import { createAssets, pickImage } from './assets.ts'
 import { createDetails, type DetailsOpts } from './details.ts'
-import { createExplorer, find, movePath, parentOf } from './explorer.ts'
-import { createFolderPage, type FolderPage } from './folderPage.ts'
+import { createExplorer, find, movePath } from './explorer.ts'
 import { livePreview } from './livePreview.ts'
-import { isFolderNote } from './sections.ts'
 import { openSettings } from './settings.ts'
 import { createTabBar, DETAILS_TAB, imageName, imageTab, loadTabs, nextTab, saveTabs } from './tabs.ts'
 import { h, showMenu } from './ui.ts'
@@ -18,10 +16,10 @@ const { api } = window
 // An open tab: a note, an image (see imageTab), the book's Details page (DETAILS_TAB), or empty
 // (path null). While another tab is shown
 // it keeps the note's editor state (with its undo history) and scroll position.
-type Tab = { path: string | null; state?: EditorState; scroll?: StateEffect<unknown>; pageScroll?: number }
+type Tab = { path: string | null; state?: EditorState; scroll?: StateEffect<unknown> }
 
 type EditorOpts = {
-  // Opens a note picked on a folder page.
+  // Opens a note the AI points at.
   openNote(path: string, newTab: boolean): void
   // Called with the active tab's note whenever it changes.
   selected(path: string | null): void
@@ -79,8 +77,7 @@ function textMenu(book: string) {
   })
 }
 
-// The open tabs and the active one's note: one editor, or for a folder note the folder's page of
-// sections. Edits autosave 500 ms after the last change, and when another note or tab is shown.
+// The open tabs and the active one's note in one editor. Edits autosave 500 ms after the last change, and when another note or tab is shown.
 function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement, book: string, o: EditorOpts) {
   let tabs: Tab[] = []
   let active: Tab | null = null
@@ -88,19 +85,16 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
   let current: string | null = null
   let loads = 0
   let restored = false
-  let page: FolderPage | null = null
   // The image an image tab shows, in place of the editor.
   let image: HTMLElement | null = null
   // The Details tab's page, in place of the editor.
   let details: ReturnType<typeof createDetails> | null = null
   let tree: Entry[] = []
-  // The editor the AI changes: the note, or the folder page's last focused text section.
-  let focused: EditorView | null = null
   let timer: ReturnType<typeof setTimeout> | undefined
   const save = () => {
     clearTimeout(timer)
     timer = undefined
-    if (current) api.files.write(current, page ? page.text() : view.state.doc.toString())
+    if (current) api.files.write(current, view.state.doc.toString())
   }
   const changed = () => {
     clearTimeout(timer)
@@ -108,7 +102,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
   }
   const view = new EditorView({ parent: pane })
   const ai = createAi({
-    view: () => (page ? (focused?.dom.isConnected ? focused : page.firstView()) : current ? view : null),
+    view: () => (current ? view : null),
     path: () => current,
     tree: () => tree,
     open: (path) => o.openNote(path, false),
@@ -122,10 +116,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     ai.extension,
     textMenu(book),
     EditorView.lineWrapping,
-    EditorView.updateListener.of((u) => {
-      if (u.focusChanged && u.view.hasFocus) focused = u.view
-      if (u.docChanged) changed()
-    })
+    EditorView.updateListener.of((u) => u.docChanged && changed())
   ]
   const bar = createTabBar({
     select(i, ctrl) {
@@ -149,13 +140,12 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     saveTabs(book, tabs.map((t) => t.path), i)
   }
 
-  // "Chapter 1 / Scene" for "Chapter 1/Scene.md"; a folder note shows as its folder, and an image
-  // as its path in the Assets ("Maps / Map.png").
+  // "Chapter 1 / Scene" for "Chapter 1/Scene.md", and an image as its path in the Assets
+  // ("Maps / Map.png").
   const showCrumbs = () => {
     const path = active?.path ?? null
     const image = imageName(path)
     const parts = path === DETAILS_TAB ? ['Details'] : image ? image.split('/') : path ? path.replace(/\.md$/, '').split('/') : []
-    if (!image && parts.length > 1 && parts.at(-1) === parts.at(-2)) parts.pop()
     crumbs.replaceChildren(...parts.flatMap((p, i) => [...(i ? [h('span', { class: 'sep', textContent: '/' })] : []), h('span', { textContent: p })]))
   }
 
@@ -163,14 +153,10 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
   function leave() {
     ai.settle()
     if (timer) save()
-    if (active && current) {
-      if (page) active.pageScroll = page.el.scrollTop
-      else Object.assign(active, { state: view.state, scroll: view.scrollSnapshot() })
-    }
-    page?.destroy()
+    if (active && current) Object.assign(active, { state: view.state, scroll: view.scrollSnapshot() })
     image?.remove()
     details?.destroy()
-    page = focused = image = details = null
+    image = details = null
     current = null
   }
 
@@ -207,20 +193,15 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       return load()
     }
     current = path
-    if (path && isFolderNote(path)) {
-      page = createFolderPage(doc, tree, { extensions, folder: () => parentOf(current!), changed, open: o.openNote })
-      pane.append(page.el)
-      view.setState(EditorState.create({ extensions }))
-      page.el.scrollTop = tab!.pageScroll ?? 0
-    } else if (tab?.state && tab.state.doc.toString() === doc) {
+    if (tab?.state && tab.state.doc.toString() === doc) {
       // Unchanged since the tab was last shown (it may have been edited in another tab).
       view.setState(tab.state)
       if (tab.scroll) view.dispatch({ effects: tab.scroll })
     } else view.setState(EditorState.create({ doc, extensions }))
-    if (tab) tab.state = tab.scroll = tab.pageScroll = undefined
-    view.dom.hidden = !!page
+    if (tab) tab.state = tab.scroll = undefined
+    view.dom.hidden = false
     // Don't steal focus from the explorer's rename box when a new note opens.
-    if (path && !page && !(document.activeElement instanceof HTMLInputElement)) view.focus()
+    if (path && !(document.activeElement instanceof HTMLInputElement)) view.focus()
   }
 
   function activate(tab: Tab | null) {
@@ -242,7 +223,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     if (newTab || !active) return add(path)
     if (active.path === path) return
     leave()
-    Object.assign(active, { path, state: undefined, scroll: undefined, pageScroll: undefined })
+    Object.assign(active, { path, state: undefined, scroll: undefined })
     load()
   }
 
@@ -299,7 +280,6 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     },
     listed(t: Entry[]) {
       tree = t
-      page?.setTree(t)
       if (restored) return
       // Reopen last time's tabs once the tree shows which notes still exist.
       restored = true
@@ -401,7 +381,7 @@ export function showBook(root: HTMLElement, book: Book): void {
   const pane = h('div', { class: 'editor' })
   const aiButton = h('button', { class: 'ai-toggle', textContent: '✨ AI', title: 'Write with AI (Ctrl+J)' })
   const newNote = h('button', { textContent: '+ Note', title: 'New note' })
-  const newFolder = h('button', { textContent: '+ Folder', title: 'New folder (opens as a page of sections)' })
+  const newFolder = h('button', { textContent: '+ Folder', title: 'New folder' })
   const main = h('main', { class: 'empty no-tabs' })
 
   const bookTitle = h('b', { textContent: book.title })

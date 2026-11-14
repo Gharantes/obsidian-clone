@@ -8,7 +8,7 @@ export const imageName = (path: string | null) => (path?.startsWith(IMAGE) ? pat
 // The tab showing the book's Details page.
 export const DETAILS_TAB = 'details:'
 
-// "Scene" for "Chapter 1/Scene.md" (a folder note "A/A.md" is "A"); an image tab is the image's
+// "Scene" for "Chapter 1/Scene.md"; an image tab is the image's
 // file name, the Details tab "Details" and a tab with no note "New tab".
 export function tabTitle(path: string | null): string {
   if (!path) return 'New tab'

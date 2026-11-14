@@ -1,5 +1,4 @@
 import type { Entry } from './api.ts'
-import { isFolderNote, parseSections } from './sections.ts'
 
 // `notes`: on the AI's turns, the notes that reply created or changed.
 export type Turn = { role: 'user' | 'assistant'; text: string; notes?: string[] }
@@ -11,7 +10,6 @@ export type AiRequest = { instruction: string; history: Turn[]; path: string | n
 export type PromptInput = AiRequest & {
   book: string
   outline: string
-  parents: { title: string; text: string }[]
   // Other notes the chat points at.
   notes: { path: string; text: string }[]
 }
@@ -28,7 +26,7 @@ Then one block per change:
 - <find> must match the note's text you were shown exactly and be unique there; keep it to the part that changes. If you weren't shown a note you need, ask the user to point at it with [[its name]].
 - To add text, put the text it should follow in <find> and repeat it at the start of <replace>. An empty <find> inserts at <cursor/> or replaces the <selection> in the open note, and adds to the end of any other note.
 - To delete text, leave <replace> empty.
-- <create> makes a note that doesn't exist yet; missing folders in its path are made too. A folder's page is its folder note, "Folder/Folder.md".
+- <create> makes a note that doesn't exist yet; missing folders in its path are made too. Folders only organize notes; they have no text of their own.
 - To add a picture, put {{image: a detailed visual description}} on its own line in <replace> or <create>.
 - Note text is Markdown, in the book's language unless asked otherwise. No preamble, no code fences.
 - Make no changes when the user only asks a question.`
@@ -41,19 +39,18 @@ export function outline(entries: Entry[], open: string | null, depth = 0): strin
   return entries
     .filter((e) => e.folder || e.name.endsWith('.md'))
     .map((e) => {
-      const here = open && (e.path === open || e.note === open) ? ' (open)' : ''
-      const line = `${'  '.repeat(depth)}- ${e.path}${e.folder ? `/${e.note ? ` (folder page: ${e.note})` : ''}` : ''}${here}`
+      const line = `${'  '.repeat(depth)}- ${e.path}${e.folder ? '/' : ''}${e.path === open ? ' (open)' : ''}`
       return e.folder ? [line, outline(e.children ?? [], open, depth + 1)].filter(Boolean).join('\n') : line
     })
     .join('\n')
 }
 
-// What a note is called in links: its path without ".md"; a folder page goes by its folder.
-export const noteName = (path: string) => (isFolderNote(path) ? path.slice(0, path.lastIndexOf('/')) : path.replace(/\.md$/, ''))
+// What a note is called in links: its path without ".md".
+export const noteName = (path: string) => path.replace(/\.md$/, '')
 
-// Every note in the book, folder pages included.
+// Every note in the book.
 export function notePaths(entries: Entry[]): string[] {
-  return entries.flatMap((e) => [...(e.note ? [e.note] : []), ...(e.folder ? notePaths(e.children ?? []) : e.name.endsWith('.md') ? [e.path] : [])])
+  return entries.flatMap((e) => (e.folder ? notePaths(e.children ?? []) : e.name.endsWith('.md') ? [e.path] : []))
 }
 
 const escape = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -76,20 +73,11 @@ export function mentioned(text: string, entries: Entry[]): string[] {
   return [...found]
 }
 
-// Folder notes above a note, outermost first: "A/B/C.md" -> ["A/A.md", "A/B/B.md"].
-// A folder note's own folder is not its parent: "A/B/B.md" -> ["A/A.md"].
-export function parentNotes(path: string): string[] {
-  const parts = path.split('/').slice(0, -1)
-  if (parts.length && `${parts.at(-1)}.md` === path.split('/').at(-1)) parts.pop()
-  return parts.map((_, i) => `${parts.slice(0, i + 1).join('/')}/${parts[i]}.md`)
-}
-
 // The user message: book context, the notes pointed at, the open note with the cursor or selection
 // marked, the chat, then the request.
 export function buildPrompt(p: PromptInput): string {
   const parts = [`Book: "${p.book}"`]
   if (p.outline) parts.push(`Book outline:\n${head(p.outline, 6000)}`)
-  for (const n of p.parents) if (n.text.trim()) parts.push(`Parent note "${n.title}":\n"""\n${head(n.text, 3000)}\n"""`)
   for (const n of p.notes) parts.push(`Note "${n.path}":\n"""\n${head(n.text, 12000)}\n"""`)
   if (p.path) {
     const sel = p.to > p.from ? `<selection>${p.doc.slice(p.from, p.to)}</selection>` : '<cursor/>'
@@ -126,10 +114,8 @@ export function parseReply(raw: string): { reply: string; edits: Edit[] } {
   return { reply: reply.trim(), edits }
 }
 
-// What goes before text added to the end of a note that isn't open: a blank line, and on a
-// folder page ending with its index, a new text section.
-export function endSeparator(doc: string, folderPage: boolean): string {
-  if (folderPage && parseSections(doc).at(-1)?.kind === 'index') return '\n<!-- section: text -->\n'
+// What goes before text added to the end of a note that isn't open: a blank line.
+export function endSeparator(doc: string): string {
   return !doc.trim() || doc.endsWith('\n\n') ? '' : doc.endsWith('\n') ? '\n' : '\n\n'
 }
 

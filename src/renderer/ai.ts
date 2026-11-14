@@ -3,7 +3,6 @@ import { Decoration, EditorView, type DecorationSet } from '@codemirror/view'
 import type { Entry } from './api.ts'
 import { find } from './explorer.ts'
 import { CHANGE, endSeparator, notePaths, noteName, parseReply, placeEdits, type Edit, type Turn } from './prompt.ts'
-import { isFolderNote } from './sections.ts'
 import { imagePicker, textPickers } from './settings.ts'
 import { ago, h } from './ui.ts'
 
@@ -25,8 +24,7 @@ window.api.ai.onChunk((id, text) => listeners.get(id)?.(text))
 const IMAGE = /\{\{image:\s*([^}]*)\}\}/g
 
 type Hooks = {
-  // The editor the AI changes in place: the open note, or on a folder page the text section last
-  // focused. Null when no note is open.
+  // The editor the AI changes in place: the open note's. Null when no note is open.
   view(): EditorView | null
   // The open note.
   path(): string | null
@@ -188,7 +186,6 @@ export function createAi(o: Hooks) {
     if (job || !instruction) return
     const path = o.path()
     const view = o.view()
-    // A folder page without a text section has nothing to edit in place: the AI sees no open note.
     const open = view ? path : null
     hideList()
     closeSuggest()
@@ -283,7 +280,7 @@ export function createAi(o: Hooks) {
         failed += list.length
         continue
       }
-      const sep = endSeparator(before, isFolderNote(path))
+      const sep = endSeparator(before)
       const r = placeEdits(before, before.length, before.length, list.map((e) => (e.find ? e : { ...e, replace: sep + e.replace })))
       failed += r.failed
       if (!r.changes.length) continue
@@ -341,8 +338,7 @@ export function createAi(o: Hooks) {
     // A created note goes with the folders made for it, unless they've been given other notes since.
     const top = f.top ? find(o.tree(), f.top) : undefined
     const others = top?.folder ? notePaths([top]).filter((p) => p !== f.path) : []
-    const empty = others.every(isFolderNote) && (await Promise.all(others.map((p) => files.read(p).catch(() => null)))).every((t) => t === '')
-    const gone = top?.folder && empty ? top.path : f.path
+    const gone = top?.folder && !others.length ? top.path : f.path
     await files.remove(gone)
     o.deleted(gone)
   }

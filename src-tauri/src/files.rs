@@ -2,14 +2,12 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::cmp::Ordering;
 
-// Folders carry `note` when they have a folder note ("X/X.md"); that note is left out of `children`.
+// Folders only organize notes: they carry `children` and have no text of their own.
 #[derive(Serialize, Debug, PartialEq)]
 pub struct Entry {
     pub path: String,
     pub name: String,
     pub folder: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub children: Option<Vec<Entry>>,
 }
@@ -61,11 +59,6 @@ pub fn join_rel(dir: &str, name: &str) -> String {
     if dir.is_empty() { name.to_string() } else { format!("{dir}/{name}") }
 }
 
-// Path of a folder's folder note: "A/B" -> "A/B/B.md".
-pub fn folder_note_path(folder: &str) -> String {
-    format!("{folder}/{}.md", base_name(folder))
-}
-
 pub fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
@@ -84,16 +77,8 @@ fn tree(rows: &[(String, bool)], dir: &str) -> Vec<Entry> {
     let mut entries = Vec::new();
     for (path, folder) in rows.iter().filter(|(p, _)| parent_of(p) == dir) {
         let (path, name) = (path.clone(), base_name(path).to_string());
-        if !folder {
-            entries.push(Entry { path, name, folder: false, note: None, children: None });
-            continue;
-        }
-        let mut children = tree(rows, &path);
-        let note = children
-            .iter()
-            .position(|c| !c.folder && c.name == format!("{name}.md"))
-            .map(|i| children.remove(i).path);
-        entries.push(Entry { path, name, folder: true, note, children: Some(children) });
+        let children = folder.then(|| tree(rows, &path));
+        entries.push(Entry { path, name, folder: *folder, children });
     }
     entries.sort_by(|a, b| b.folder.cmp(&a.folder).then_with(|| natural_cmp(&a.name, &b.name)));
     entries
@@ -177,19 +162,14 @@ pub fn bad_name(name: &str) -> Option<String> {
     None
 }
 
-// Creates "Untitled" in `parent` ("" = root). Folders get a folder note. Returns the new path.
+// Creates "Untitled" in `parent` ("" = root). Returns the new path.
 pub fn create_entry(db: &Connection, book: &str, parent: &str, folder: bool) -> Result<String, String> {
     let path = available_path(db, book, &join_rel(parent, "Untitled"), if folder { "" } else { "md" })?;
-    if folder {
-        insert(db, book, &path, None)?;
-        insert(db, book, &folder_note_path(&path), Some(""))?;
-    } else {
-        insert(db, book, &path, Some(""))?;
-    }
+    insert(db, book, &path, if folder { None } else { Some("") })?;
     Ok(path)
 }
 
-// Creates note `rel` with `text`, adding any missing folders in its path (each with a folder note).
+// Creates note `rel` with `text`, adding any missing folders in its path.
 // Returns the topmost entry created, so removing it undoes this.
 pub fn create_note(db: &Connection, book: &str, rel: &str, text: &str) -> Result<String, String> {
     check(rel)?;
@@ -208,24 +188,18 @@ pub fn create_note(db: &Connection, book: &str, rel: &str, text: &str) -> Result
             Some(false) => return Err(format!("\"{dir}\" is a file, not a folder")),
             None => {
                 insert(db, book, &dir, None)?;
-                insert(db, book, &folder_note_path(&dir), Some(""))?;
                 top.get_or_insert(dir.clone());
             }
         }
     }
-    // The note is the folder note of a folder just made: fill it in.
-    if top.is_some() && rel == folder_note_path(parent_of(rel)) {
-        write(db, book, rel, text)?;
-    } else if exists(db, book, rel)? {
+    if exists(db, book, rel)? {
         return Err(format!("\"{rel}\" already exists"));
-    } else {
-        insert(db, book, rel, Some(text))?;
     }
+    insert(db, book, rel, Some(text))?;
     Ok(top.unwrap_or_else(|| rel.to_string()))
 }
 
 // Renames an entry inside its folder; returns the new book-relative path or an error message.
-// Renaming a folder renames its folder note along with it.
 pub fn rename_entry(db: &Connection, book: &str, rel: &str, new_name: &str) -> Result<String, String> {
     let new_name = new_name.trim();
     if let Some(bad) = bad_name(new_name) {
@@ -240,30 +214,7 @@ pub fn rename_entry(db: &Connection, book: &str, rel: &str, new_name: &str) -> R
         return Err(format!("\"{new_name}\" already exists"));
     }
     relocate(db, book, rel, &path)?;
-    let old_note = format!("{path}/{}.md", base_name(rel));
-    if exists(db, book, &old_note)? && !exists(db, book, &folder_note_path(&path))? {
-        relocate(db, book, &old_note, &folder_note_path(&path))?;
-    }
     Ok(path)
-}
-
-// Turns note "A/B.md" into the folder note "A/B/B.md" so notes can go inside it. Returns its new path.
-pub fn nest_note(db: &Connection, book: &str, rel: &str) -> Result<String, String> {
-    let Some(folder) = rel.strip_suffix(".md") else {
-        return Err("Only notes can hold other notes".to_string());
-    };
-    if base_name(parent_of(rel)) == base_name(folder) {
-        return Ok(rel.to_string()); // already a folder note
-    }
-    let target = folder_note_path(folder);
-    if exists(db, book, &target)? {
-        return Err(format!("\"{target}\" already exists"));
-    }
-    if !exists(db, book, folder)? {
-        insert(db, book, folder, None)?;
-    }
-    relocate(db, book, rel, &target)?;
-    Ok(target)
 }
 
 // Moves an entry into `dest` ("" = root). Returns the new path or an error message.
@@ -316,7 +267,7 @@ pub mod tests {
         assert_eq!(paths(&tree), ["a", "b", "note 2.md", "note 10.md"], "folders first, numeric order");
         assert_eq!(
             tree[0].children.as_deref().unwrap(),
-            [Entry { path: "a/inner.md".into(), name: "inner.md".into(), folder: false, note: None, children: None }]
+            [Entry { path: "a/inner.md".into(), name: "inner.md".into(), folder: false, children: None }]
         );
 
         assert!(check("../escape.md").is_err());
@@ -339,30 +290,23 @@ pub mod tests {
     }
 
     #[test]
-    fn folder_notes() {
+    fn folders() {
         let db = &test_db();
 
-        // New folders come with a folder note, which the tree reports on the folder, not as a child.
+        // New folders are empty; notes go inside them.
         assert_eq!(create_entry(db, "b", "", true).unwrap(), "Untitled");
-        assert!(exists(db, "b", "Untitled/Untitled.md").unwrap());
-        assert_eq!(create_entry(db, "b", "Untitled", false).unwrap(), "Untitled/Untitled 1.md");
+        assert_eq!(create_entry(db, "b", "Untitled", false).unwrap(), "Untitled/Untitled.md");
         let tree = list_tree(db, "b").unwrap();
-        assert_eq!(tree.len(), 1);
-        assert_eq!(tree[0].note.as_deref(), Some("Untitled/Untitled.md"));
-        assert_eq!(paths(tree[0].children.as_deref().unwrap()), ["Untitled/Untitled 1.md"]);
+        assert_eq!(paths(&tree), ["Untitled"]);
+        assert_eq!(paths(tree[0].children.as_deref().unwrap()), ["Untitled/Untitled.md"], "a note named like its folder is an ordinary note");
 
-        // Renaming the folder renames its note.
+        // Renaming a folder moves its contents and leaves their names alone.
         assert_eq!(rename_entry(db, "b", "Untitled", "Chapter 1"), Ok("Chapter 1".into()));
-        assert!(exists(db, "b", "Chapter 1/Chapter 1.md").unwrap());
-
-        // A note becomes a folder note so notes can be nested under it.
-        write(db, "b", "Chapter 1/Scene.md", "text").unwrap();
-        assert_eq!(nest_note(db, "b", "Chapter 1/Scene.md"), Ok("Chapter 1/Scene/Scene.md".into()));
-        assert_eq!(nest_note(db, "b", "Chapter 1/Scene/Scene.md"), Ok("Chapter 1/Scene/Scene.md".into()), "already nested");
-        let tree = list_tree(db, "b").unwrap();
-        assert_eq!(tree[0].children.as_ref().unwrap()[0].note.as_deref(), Some("Chapter 1/Scene/Scene.md"));
+        assert!(exists(db, "b", "Chapter 1/Untitled.md").unwrap());
 
         // Moving.
+        insert(db, "b", "Chapter 1/Scene", None).unwrap();
+        write(db, "b", "Chapter 1/Scene/Scene.md", "text").unwrap();
         assert_eq!(move_entry(db, "b", "Chapter 1/Scene", ""), Ok("Scene".into()));
         assert_eq!(read(db, "b", "Scene/Scene.md").unwrap(), "text");
         assert!(move_entry(db, "b", "Chapter 1", "Chapter 1").is_err(), "not into itself");
@@ -370,16 +314,14 @@ pub mod tests {
         assert!(move_entry(db, "b", "Scene.md", "Scene").is_err(), "no overwriting");
         assert!(move_entry(db, "b", "Scene.md", "Nowhere").is_err(), "needs an existing folder");
 
-        // Creating a note makes the folders on its way, each with a folder note.
+        // Creating a note makes the folders on its way, and nothing else.
         assert_eq!(create_note(db, "b", "Part 2/Act 1/Arrival.md", "text"), Ok("Part 2".into()));
         assert_eq!(read(db, "b", "Part 2/Act 1/Arrival.md").unwrap(), "text");
-        assert!(exists(db, "b", "Part 2/Part 2.md").unwrap() && exists(db, "b", "Part 2/Act 1/Act 1.md").unwrap());
+        assert!(!exists(db, "b", "Part 2/Part 2.md").unwrap());
         assert_eq!(create_note(db, "b", "Part 2/Ideas.md", ""), Ok("Part 2/Ideas.md".into()));
         assert!(create_note(db, "b", "Part 2/Ideas.md", "").is_err(), "no overwriting");
         assert!(create_note(db, "b", "Part 2/Ideas", "").is_err(), "notes only");
         assert!(create_note(db, "b", "Part 2/Ideas.md/x.md", "").is_err(), "not inside a note");
-        assert_eq!(create_note(db, "b", "Part 3/Part 3.md", "page"), Ok("Part 3".into()), "a new folder's own page");
-        assert_eq!(read(db, "b", "Part 3/Part 3.md").unwrap(), "page");
 
         // "Chapter 1x" shares a prefix with "Chapter 1" but isn't inside it.
         insert(db, "b", "Chapter 1x", None).unwrap();

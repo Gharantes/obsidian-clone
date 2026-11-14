@@ -12,14 +12,11 @@ type Handlers = {
 const files = () => window.api.files
 export const isNote = (e: Entry) => !e.folder && e.name.endsWith('.md')
 export const label = (e: Entry) => (isNote(e) ? e.name.slice(0, -3) : e.name)
-const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 export const parentOf = (p: string) => p.slice(0, Math.max(0, p.lastIndexOf('/')))
 
-// Path after `from` was renamed or moved to `to` (unchanged when unrelated). Renaming a folder
-// renames its folder note too: "A/A.md" becomes "B/B.md".
+// Path after `from` was renamed or moved to `to` (unchanged when unrelated).
 export function movePath(p: string, from: string, to: string): string {
   if (p !== from && !p.startsWith(from + '/')) return p
-  if (to && p === `${from}/${baseName(from)}.md`) return `${to}/${baseName(to)}.md`
   return to + p.slice(from.length)
 }
 
@@ -31,8 +28,8 @@ export function find(entries: Entry[], path: string): Entry | undefined {
   }
 }
 
-// File tree in folder-note style: a folder with a note of the same name shows as one item that
-// opens the note; its arrow expands it. Right-click for actions, drag to move.
+// File tree: folders organize notes, and clicking one expands or collapses it. Right-click for
+// actions, drag to move.
 export function createExplorer(list: HTMLElement, h: Handlers) {
   let tree: Entry[] = []
   let active: string | null = null
@@ -45,7 +42,7 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
       const li = document.createElement('li')
       const row = li.appendChild(document.createElement('div'))
       const open = expanded.has(e.path)
-      row.className = ['row', e.folder && 'folder', open && 'open', e.note && 'has-note', (e.path === active || e.note === active) && 'active', !e.folder && !isNote(e) && 'other']
+      row.className = ['row', e.folder && 'folder', open && 'open', e.path === active && 'active', !e.folder && !isNote(e) && 'other']
         .filter(Boolean)
         .join(' ')
       row.dataset.path = e.path
@@ -58,10 +55,9 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
       }
       row.appendChild(document.createElement('span')).textContent = label(e)
       // Ctrl/Cmd+click or middle-click opens the note in a new tab.
-      const target = e.note ?? (isNote(e) ? e.path : undefined)
+      const target = isNote(e) ? e.path : undefined
       row.onclick = (ev) => {
-        if (e.folder && !e.note) return toggle(e.path)
-        if (e.note) expanded.add(e.path)
+        if (e.folder) return toggle(e.path)
         if (target) openNote(target, ev.ctrlKey || ev.metaKey)
       }
       row.onmousedown = (ev) => {
@@ -135,13 +131,8 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
 
   function menuFor(e: Entry, row: HTMLElement): MenuItem[] {
     const items: MenuItem[] = []
-    const note = e.note ?? (isNote(e) ? e.path : undefined)
-    if (note) items.push({ label: 'Open in new tab', run: () => openNote(note, true) }, '-')
-    if (e.folder) {
-      items.push({ label: 'New note', run: () => create(false, e.path) }, { label: 'New folder', run: () => create(true, e.path) })
-      if (!e.note) items.push({ label: 'Create folder page', run: () => createFolderNote(e) })
-      items.push('-')
-    } else if (isNote(e)) items.push({ label: 'New note inside', run: () => nestAndCreate(e) }, '-')
+    if (isNote(e)) items.push({ label: 'Open in new tab', run: () => openNote(e.path, true) }, '-')
+    if (e.folder) items.push({ label: 'New note', run: () => create(false, e.path) }, { label: 'New folder', run: () => create(true, e.path) }, '-')
     items.push({ label: 'Rename', run: () => startRename(e, row) }, { label: 'Delete', danger: true, run: () => remove(e) })
     return items
   }
@@ -194,34 +185,16 @@ export function createExplorer(list: HTMLElement, h: Handlers) {
     refresh()
   }
 
-  // Creates "Untitled" in `parent` ('' = root), opens it and starts renaming it.
-  // New folders come with a folder note, so they open like notes.
+  // Creates "Untitled" in `parent` ('' = root) and starts renaming it; a new note also opens.
   async function create(folder: boolean, parent = '') {
     const path = await files().create(folder, parent)
     for (let p = parent; p; p = parentOf(p)) expanded.add(p)
     await load()
     const entry = find(tree, path)
-    const note = folder ? entry?.note : path
-    if (note) openNote(note)
-    else redraw()
+    if (folder) redraw()
+    else openNote(path)
     const row = list.querySelector<HTMLElement>(`[data-path="${CSS.escape(path)}"]`)
     if (row && entry) startRename(entry, row)
-  }
-
-  async function createFolderNote(e: Entry) {
-    const path = `${e.path}/${e.name}.md`
-    await files().write(path, '')
-    expanded.add(e.path)
-    await load()
-    openNote(path)
-  }
-
-  // Turns a note into a folder note, then creates a new note inside it.
-  async function nestAndCreate(e: Entry) {
-    const r = await files().nest(e.path)
-    if ('error' in r) return alert(r.error)
-    moved(e.path, r.path)
-    await create(false, parentOf(r.path))
   }
 
   list.oncontextmenu = (ev) =>

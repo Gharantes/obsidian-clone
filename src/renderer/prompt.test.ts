@@ -1,45 +1,37 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildPrompt, endSeparator, mentioned, noteName, notePaths, outline, parentNotes, parseReply, placeEdits } from './prompt.ts'
-
-test('parent folder notes', () => {
-  assert.deepEqual(parentNotes('A/B/C.md'), ['A/A.md', 'A/B/B.md'])
-  assert.deepEqual(parentNotes('A/B/B.md'), ['A/A.md'], "a folder note's own folder is not a parent")
-  assert.deepEqual(parentNotes('Top.md'), [])
-})
+import { buildPrompt, endSeparator, mentioned, noteName, notePaths, outline, parseReply, placeEdits } from './prompt.ts'
 
 test('book outline', () => {
   const tree = [
-    { path: 'Part 1', name: 'Part 1', folder: true, note: 'Part 1/Part 1.md', children: [{ path: 'Part 1/Scene.md', name: 'Scene.md', folder: false }] },
+    { path: 'Part 1', name: 'Part 1', folder: true, children: [{ path: 'Part 1/Scene.md', name: 'Scene.md', folder: false }] },
     { path: 'cover.png', name: 'cover.png', folder: false },
     { path: 'Ideas.md', name: 'Ideas.md', folder: false }
   ]
-  assert.equal(outline(tree, 'Part 1/Part 1.md'), '- Part 1/ (folder page: Part 1/Part 1.md) (open)\n  - Part 1/Scene.md\n- Ideas.md')
-  assert.equal(outline(tree, null), '- Part 1/ (folder page: Part 1/Part 1.md)\n  - Part 1/Scene.md\n- Ideas.md')
+  assert.equal(outline(tree, 'Part 1/Scene.md'), '- Part 1/\n  - Part 1/Scene.md (open)\n- Ideas.md')
+  assert.equal(outline(tree, null), '- Part 1/\n  - Part 1/Scene.md\n- Ideas.md')
 })
 
 test('notes the chat points at', () => {
   const tree = [
-    { path: 'Part 1', name: 'Part 1', folder: true, note: 'Part 1/Part 1.md', children: [{ path: 'Part 1/Mira.md', name: 'Mira.md', folder: false }] },
+    { path: 'Part 1', name: 'Part 1', folder: true, children: [{ path: 'Part 1/Mira.md', name: 'Mira.md', folder: false }] },
     { path: 'Ideas.md', name: 'Ideas.md', folder: false },
     { path: 'Al.md', name: 'Al.md', folder: false }
   ]
-  assert.deepEqual(notePaths(tree), ['Part 1/Part 1.md', 'Part 1/Mira.md', 'Ideas.md', 'Al.md'])
-  assert.equal(noteName('Part 1/Part 1.md'), 'Part 1', 'a folder page goes by its folder')
+  assert.deepEqual(notePaths(tree), ['Part 1/Mira.md', 'Ideas.md', 'Al.md'])
+  assert.equal(noteName('Part 1/Part 1.md'), 'Part 1/Part 1', 'a note named like its folder is an ordinary note')
   assert.deepEqual(mentioned('fix [[Part 1/Mira]] and [[ideas.md]]', tree), ['Part 1/Mira.md', 'Ideas.md'], 'links by path')
-  assert.deepEqual(mentioned('see [[Part 1]]', tree), ['Part 1/Part 1.md'], 'a folder link is its page')
   assert.deepEqual(mentioned('make mira braver', tree), ['Part 1/Mira.md'], 'titles written out')
   assert.deepEqual(mentioned('a Mirage and Al', tree), [], 'whole words, three letters or more')
 })
 
 test('prompt marks the cursor or the selection and carries the chat', () => {
-  const base = { instruction: 'make it rain', history: [], path: 'Part 1/Scene.md', doc: 'Hello world.', book: 'Novel', outline: '- Scene', parents: [{ title: 'Part 1', text: 'Summary' }], notes: [] }
+  const base = { instruction: 'make it rain', history: [], path: 'Part 1/Scene.md', doc: 'Hello world.', book: 'Novel', outline: '- Scene', notes: [] }
 
   const atCursor = buildPrompt({ ...base, from: 6, to: 6 })
   assert.match(atCursor, /Hello <cursor\/>world\./)
   assert.match(atCursor, /User: make it rain$/)
   assert.match(atCursor, /Book: "Novel"/)
-  assert.match(atCursor, /Parent note "Part 1":\n"""\nSummary/)
   assert.doesNotMatch(atCursor, /Chat so far/)
 
   const selected = buildPrompt({ ...base, from: 6, to: 11, history: [{ role: 'user', text: 'hi' }, { role: 'assistant', text: 'Hello!' }] })
@@ -68,10 +60,9 @@ test('reply parsing, while streaming and when done', () => {
 })
 
 test('adding to the end of a note', () => {
-  assert.equal(endSeparator('', false), '')
-  assert.equal(endSeparator('Text.', false), '\n\n')
-  assert.equal(endSeparator('Text.\n', false), '\n')
-  assert.equal(endSeparator('<!-- section: text -->\nIntro\n<!-- section: index -->', true), '\n<!-- section: text -->\n', 'not into the index')
+  assert.equal(endSeparator(''), '')
+  assert.equal(endSeparator('Text.'), '\n\n')
+  assert.equal(endSeparator('Text.\n'), '\n')
 })
 
 test('placing edits', () => {

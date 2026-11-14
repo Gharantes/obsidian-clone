@@ -261,6 +261,13 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       if (tab) activate(tab)
       else add(path)
     },
+    // Shows a blank tab: the nearest open one to the right of the active tab, else a new one.
+    blank() {
+      const i = active ? tabs.indexOf(active) : -1
+      const tab = [...tabs.slice(i + 1), ...tabs.slice(0, i + 1).reverse()].find((t) => !t.path)
+      if (tab) activate(tab)
+      else add(null)
+    },
     closeTab: () => active && closeWhere((t) => t === active),
     // Shows the tab `by` places to the right (negative: left), wrapping around, and its panel in
     // the sidebar.
@@ -312,15 +319,24 @@ const icons = {
 }
 
 // A view the sidebar can show, picked from the ribbon. `shown` runs each time it's shown. One with
-// `open` instead of `el` is a button that opens something else (a tab), not a sidebar view. An
-// `optional` panel's button is only on the ribbon once turned on in the ribbon's extras menu.
-type Panel = { id: string; title: string; icon: string; shown?: () => void; optional?: boolean } & ({ el: HTMLElement } | { open: () => void })
+// `page` instead of `el` is a button that opens one of the book's page tabs (see PAGE_TABS), not a
+// sidebar view. An `optional` panel's button is only on the ribbon once turned on in the ribbon's
+// extras menu.
+type Panel = { id: string; title: string; icon: string; shown?: () => void; optional?: boolean } & ({ el: HTMLElement } | { page: string })
+
+type RibbonOpts = {
+  // Shows a page tab (by its path in PAGE_TABS).
+  openPage(path: string): void
+  // Moves off the page tab being shown, to a blank tab.
+  leavePage(): void
+}
 
 // The ribbon: a narrow column of buttons, one per sidebar panel. A button shows its panel in the
 // sidebar; clicking the shown panel's button again collapses the sidebar. Which panel is shown and
 // which optional panels are on are remembered per book. While a page tab (Details, Tags) is shown
-// the sidebar steps aside, leaving just the ribbon, until a panel button is clicked.
-function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
+// the sidebar is hidden, leaving just the ribbon with that page's button lit; a panel button then
+// moves to a blank tab first and shows its panel there.
+function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[], o: RibbonOpts) {
   const key = `sidebar:${book}`
   const extrasKey = `ribbon-extras:${book}`
   const on = new Set<string>()
@@ -336,14 +352,35 @@ function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
     if (saved === '') shown = null // collapsed
     else if (available(saved) && views.some((p) => p.id === saved)) shown = saved
   } catch {}
-  // The sidebar is hidden for a page tab rather than collapsed: `shown` stays as it was.
-  let away = false
-  let onPage = false
+  // The page panel whose tab is shown, if one is.
+  let page: string | null = null
   const buttons = panels.map((p) => {
     const b = h('button', { class: 'icon', title: p.title, innerHTML: p.icon, hidden: !available(p.id) })
-    b.onclick = () => ('open' in p ? p.open() : show(shown === p.id && !away ? null : p.id))
+    b.onclick = () => pick(p)
     return b
   })
+  const draw = () => {
+    panels.forEach((p, i) => {
+      if ('el' in p) p.el.hidden = p.id !== shown
+      buttons[i].classList.toggle('on', p.id === (page ?? shown))
+    })
+    sidebar.hidden = !!page || !shown
+  }
+  const show = (id: string | null) => {
+    shown = id
+    draw()
+    panels.find((p) => p.id === id)?.shown?.()
+    try {
+      localStorage.setItem(key, id ?? '')
+    } catch {}
+  }
+  // A ribbon button was clicked (or its panel turned on).
+  const pick = (p: Panel) => {
+    if ('page' in p) return o.openPage(p.page)
+    if (!page) return show(shown === p.id ? null : p.id)
+    o.leavePage()
+    show(p.id)
+  }
   const toggle = (p: Panel, enabled: boolean) => {
     if (enabled) on.add(p.id)
     else on.delete(p.id)
@@ -351,25 +388,12 @@ function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
       localStorage.setItem(extrasKey, JSON.stringify([...on]))
     } catch {}
     buttons[panels.indexOf(p)].hidden = !enabled
-    if (enabled) 'open' in p ? p.open() : show(p.id)
+    if (enabled) pick(p)
     else if (shown === p.id) show(panels[0].id)
   }
   const extras = h('button', { class: 'icon extras', title: 'More in the ribbon', innerHTML: icons.extras })
   extras.onclick = (ev) =>
     showMenu(ev, panels.filter((p) => p.optional).map((p) => ({ label: p.title, checked: on.has(p.id), run: (c: boolean) => toggle(p, c) })))
-  const show = (id: string | null) => {
-    shown = id
-    away = false
-    panels.forEach((p, i) => {
-      if ('el' in p) p.el.hidden = p.id !== id
-      buttons[i].classList.toggle('on', p.id === id)
-    })
-    sidebar.hidden = !id
-    panels.find((p) => p.id === id)?.shown?.()
-    try {
-      localStorage.setItem(key, id ?? '')
-    } catch {}
-  }
   sidebar.append(...views.map((p) => p.el))
   show(shown)
   return {
@@ -377,19 +401,12 @@ function createRibbon(sidebar: HTMLElement, book: string, panels: Panel[]) {
     // The button that opens the optional-panels menu; the caller places it.
     extras,
     // Shows the panel, leaving it open if it already is.
-    reveal: (id: string) => (shown !== id || away) && show(id),
-    // Hides the sidebar when a page tab is shown and brings it back once a note, image or empty
-    // tab is; only acts when that changes, so reloading the same page leaves the sidebar alone.
-    page(on: boolean) {
-      if (on === onPage) return
-      onPage = on
-      if (on) {
-        away = !sidebar.hidden
-        sidebar.hidden = true
-      } else if (away) {
-        away = false
-        sidebar.hidden = !shown
-      }
+    reveal: (id: string) => shown !== id && show(id),
+    // Called with the active tab's path whenever it changes: a page tab hides the sidebar and
+    // lights its button; anything else brings the sidebar back.
+    tab(path: string | null) {
+      page = panels.find((p) => 'page' in p && p.page === path)?.id ?? null
+      draw()
     }
   }
 }
@@ -430,11 +447,14 @@ export function showBook(root: HTMLElement, book: Book): void {
     placeholderPanel('locations', 'Locations', icons.locations),
     placeholderPanel('species', 'Species', icons.species),
     placeholderPanel('items', 'Items', icons.items),
-    { id: 'tags', title: 'Tags', icon: icons.tags, optional: true, open: () => editor.page(TAGS_TAB) }
-  ])
+    { id: 'tags', title: 'Tags', icon: icons.tags, optional: true, page: TAGS_TAB },
+    { id: 'details', title: 'Details', icon: icons.details, page: DETAILS_TAB }
+  ], {
+    openPage: (path) => editor.page(path),
+    leavePage: () => editor.blank()
+  })
   ribbon.el.prepend(h('button', { class: 'icon', textContent: '←', title: 'Back to library', onclick: () => api.books.close() }))
   ribbon.el.append(
-    h('button', { class: 'icon', title: 'Details', innerHTML: icons.details, onclick: () => editor.page(DETAILS_TAB) }),
     ribbon.extras,
     h('button', { class: 'icon', textContent: '⚙', title: 'Settings', onclick: () => openSettings() })
   )
@@ -442,7 +462,7 @@ export function showBook(root: HTMLElement, book: Book): void {
   const editor = createEditor(main, pane, crumbs, book.id, {
     openNote: (path, newTab) => explorer.open(path, newTab),
     selected(path) {
-      ribbon.page(!!path && !!PAGE_TABS[path])
+      ribbon.tab(path)
       explorer.select(path)
       assets.select(path)
     },

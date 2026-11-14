@@ -266,18 +266,23 @@ export async function openSettings(): Promise<void> {
     }
   })
 
+  // A sidebar of pages; clicking one shows it in place of the others.
+  const pages: [string, Node[]][] = [
+    ['AI Writing', [claude, ...apis.map((x) => x.el)]],
+    ['AI Images', [pollinations, cloudflare, imageOpenai]]
+  ]
+  const hint = h('p', { class: 'hint', textContent: 'Choose which provider and model to use in the AI sidebar.' })
+  const views = pages.map(([, body]) => h('div', { class: 'settings-page' }, hint.cloneNode(true), ...body))
+  const tabs = pages.map(([name], i) => h('button', { textContent: name, onclick: () => show(i) }))
+  const show = (i: number) => {
+    views.forEach((v, j) => (v.hidden = j !== i))
+    tabs.forEach((t, j) => t.classList.toggle('on', j === i))
+  }
+  show(0)
+
   const dlg = modal(
     'Settings',
-    [
-      h('p', { class: 'hint', textContent: 'Choose which provider and model to use in the AI sidebar.' }),
-      h('h3', { textContent: 'AI writing' }),
-      claude,
-      ...apis.map((x) => x.el),
-      h('h3', { textContent: 'Images' }),
-      pollinations,
-      cloudflare,
-      imageOpenai
-    ],
+    [h('div', { class: 'settings-layout' }, h('nav', {}, ...tabs), ...views)],
     [
       h('button', { textContent: 'Cancel', onclick: () => dlg.close() }),
       h('button', { class: 'primary', textContent: 'Save', onclick: async () => (await api.settings.set(collect()), dlg.close()) })

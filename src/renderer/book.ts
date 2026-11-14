@@ -395,12 +395,7 @@ export function showBook(root: HTMLElement, book: Book): void {
   const main = h('main', { class: 'empty no-tabs' })
 
   const bookTitle = h('b', { textContent: book.title })
-  const nav = h('nav', {},
-    h('div', { class: 'book-head' },
-      h('button', { class: 'icon', textContent: '←', title: 'Back to library', onclick: () => api.books.close() }),
-      bookTitle
-    )
-  )
+  const nav = h('nav', {}, h('div', { class: 'book-head' }, bookTitle))
   const assets = createAssets({
     open: (path, newTab) => editor.open(path, newTab),
     flush: () => editor.flush(),
@@ -419,6 +414,7 @@ export function showBook(root: HTMLElement, book: Book): void {
     placeholderPanel('items', 'Items', icons.items),
     { id: 'tags', title: 'Tags', icon: icons.tags, optional: true, open: () => editor.page(TAGS_TAB) }
   ])
+  ribbon.el.prepend(h('button', { class: 'icon', textContent: '←', title: 'Back to library', onclick: () => api.books.close() }))
   ribbon.el.append(
     h('button', { class: 'icon', title: 'Details', innerHTML: icons.details, onclick: () => editor.page(DETAILS_TAB) }),
     ribbon.extras,

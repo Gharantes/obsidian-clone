@@ -492,6 +492,8 @@ async fn ai_test(app: AppHandle, system: String, provider: Option<String>) -> Va
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .invoke_handler(tauri::generate_handler![
             book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_summary, book_tags, book_cover, book_remove,
             fs_list, fs_read, fs_write, fs_rename, fs_move, fs_remove, fs_create, fs_create_note,

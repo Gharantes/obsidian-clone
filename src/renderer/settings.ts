@@ -1,3 +1,6 @@
+import { getVersion } from '@tauri-apps/api/app'
+import { relaunch } from '@tauri-apps/plugin-process'
+import { check, type Update } from '@tauri-apps/plugin-updater'
 import type { ApiConfig, Settings } from './api.ts'
 import { parseReply } from './prompt.ts'
 import { h, modal } from './ui.ts'
@@ -287,12 +290,43 @@ export async function openSettings(): Promise<void> {
     h('div', { class: 'row-input' }, exportButton, exportResult)
   ]
 
+  // About: the installed version and a button that looks for a newer release on GitHub (see RELEASE.md).
+  const version = h('p', { class: 'hint' })
+  getVersion().then((v) => (version.textContent = `obsidian-clone ${v}`))
+  const updateResult = h('p', { class: 'hint' })
+  const updateButton = h('button', {
+    textContent: 'Check for updates',
+    onclick: async () => {
+      updateButton.disabled = true
+      updateResult.className = 'hint'
+      try {
+        if (pending) {
+          updateResult.textContent = `Downloading ${pending.version}…`
+          await pending.downloadAndInstall()
+          await relaunch()
+          return
+        }
+        updateResult.textContent = 'Checking…'
+        pending = await check()
+        updateResult.textContent = pending ? `Version ${pending.version} is available.` : 'You have the latest version.'
+        if (pending) updateButton.textContent = 'Update and restart'
+      } catch (e) {
+        updateResult.className = 'error'
+        updateResult.textContent = `Couldn't update: ${e}`
+      }
+      updateButton.disabled = false
+    }
+  })
+  let pending: Update | null = null
+  const aboutPage = [version, h('div', { class: 'row-input' }, updateButton, updateResult)]
+
   // A sidebar of pages; clicking one shows it in place of the others.
   const aiHint = 'Choose which provider and model to use in the AI sidebar.'
   const pages: [string, Node[], string?][] = [
     ['AI Writing', [claude, ...apis.map((x) => x.el)], aiHint],
     ['AI Images', [pollinations, cloudflare, imageOpenai], aiHint],
-    ['Export', exportPage]
+    ['Export', exportPage],
+    ['About', aboutPage]
   ]
   const views = pages.map(([, body, hint]) => h('div', { class: 'settings-page' }, ...(hint ? [h('p', { class: 'hint', textContent: hint })] : []), ...body))
   const tabs = pages.map(([name], i) => h('button', { textContent: name, onclick: () => show(i) }))

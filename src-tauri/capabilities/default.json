@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Lets every window listen to the events the backend sends it.",
   "windows": ["*"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "updater:default", "process:allow-restart"]
 }

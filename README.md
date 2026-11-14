@@ -38,3 +38,6 @@ npm test           # frontend unit tests
 npm run test:rust  # backend unit tests
 npm run typecheck
 ```
+
+To publish a version (installers + in-app updates via **Settings → About → Check for updates**), see
+[RELEASE.md](RELEASE.md).

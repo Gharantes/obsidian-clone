@@ -9,6 +9,7 @@ import { createExplorer, find, movePath } from './explorer.ts'
 import { livePreview } from './livePreview.ts'
 import { openSettings } from './settings.ts'
 import { createTabBar, DETAILS_TAB, imageName, imageTab, loadTabs, nextTab, PAGE_TABS, saveTabs, TAGS_TAB } from './tabs.ts'
+import { createTags } from './tags.ts'
 import { h, showMenu } from './ui.ts'
 
 const { api } = window
@@ -85,10 +86,12 @@ function createEditor(main: HTMLElement, pane: HTMLElement, book: string, o: Edi
   let current: string | null = null
   let loads = 0
   let restored = false
-  // What an image tab or the Tags tab shows, in place of the editor.
+  // What an image tab shows, in place of the editor.
   let image: HTMLElement | null = null
   // The Details tab's page, in place of the editor.
   let details: ReturnType<typeof createDetails> | null = null
+  // The Tags tab's page, in place of the editor.
+  let tagsPage: ReturnType<typeof createTags> | null = null
   let tree: Entry[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
   const save = () => {
@@ -147,7 +150,8 @@ function createEditor(main: HTMLElement, pane: HTMLElement, book: string, o: Edi
     if (active && current) Object.assign(active, { state: view.state, scroll: view.scrollSnapshot() })
     image?.remove()
     details?.destroy()
-    image = details = null
+    tagsPage?.destroy()
+    image = details = tagsPage = null
     current = null
   }
 
@@ -168,9 +172,11 @@ function createEditor(main: HTMLElement, pane: HTMLElement, book: string, o: Edi
       return
     }
     if (path === TAGS_TAB) {
-      image = h('div', { class: 'details-page' }, h('h2', { textContent: 'Tags' }), h('p', { class: 'muted', textContent: 'No tags yet.' }))
-      pane.append(image)
       view.dom.hidden = true
+      const b = await api.books.current()
+      if (n !== loads || !b) return
+      tagsPage = createTags(b)
+      pane.append(tagsPage.el)
       return
     }
     const imagePath = imageName(path)

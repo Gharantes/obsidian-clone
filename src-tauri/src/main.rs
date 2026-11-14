@@ -193,6 +193,11 @@ fn book_summary(state: AppState, id: String, summary: String) -> Result<(), Stri
 }
 
 #[tauri::command]
+fn book_tags(state: AppState, id: String, tags: Vec<String>) -> Result<(), String> {
+    books::set_tags(&state.lock().unwrap().db, &id, &tags)
+}
+
+#[tauri::command]
 fn book_cover(state: AppState, id: String, name: Option<String>) -> Result<(), String> {
     books::set_cover(&state.lock().unwrap().db, &id, name.as_deref())
 }
@@ -488,7 +493,7 @@ fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![
-            book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_summary, book_cover, book_remove,
+            book_list, book_covers, book_create, book_open, book_import, book_export, book_close, book_current, book_rename, book_color, book_summary, book_tags, book_cover, book_remove,
             fs_list, fs_read, fs_write, fs_rename, fs_move, fs_remove, fs_create, fs_create_note,
             chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,

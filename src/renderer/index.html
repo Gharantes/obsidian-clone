@@ -94,6 +94,13 @@
       .details-summary { flex: 1; min-width: 0; display: flex; flex-direction: column; }
       .details-summary textarea { min-height: 320px; resize: vertical; font-size: 16px; line-height: 1.6; padding: 10px 12px; }
       .details-summary .hint { min-height: 1.2em; }
+      .tags-table { width: 100%; border-collapse: collapse; margin-top: 14px; }
+      .tags-table th { text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--line); }
+      .tags-table td { padding: 0; border-bottom: 1px solid var(--line); }
+      .tags-table td input { width: 100%; border: 0; border-radius: 0; background: none; padding: 8px 10px; }
+      .tags-table tr:hover td { background: var(--hover); }
+      .tags-page > .muted { margin-top: 12px; }
+      .tags-page .add-tag { margin-top: 12px; }
       @media (max-width: 760px) { .details-body { flex-direction: column; } }
       .image-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
       .image-grid button { padding: 0; aspect-ratio: 3 / 4; overflow: hidden; border-radius: 6px; border: 2px solid transparent; background: var(--bg-2); }

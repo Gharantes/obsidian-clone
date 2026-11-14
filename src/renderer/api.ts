@@ -6,7 +6,7 @@ import { buildPrompt, mentioned, outline, SYSTEM, type AiRequest, type Turn } fr
 export type Entry = { path: string; name: string; folder: boolean; children?: Entry[] }
 
 // `cover` is the path of the book's cover image (see images), if it has one.
-export type Book = { id: string; ts: number; title: string; notes: number; color: string; cover: string | null; summary: string }
+export type Book = { id: string; ts: number; title: string; notes: number; color: string; cover: string | null; summary: string; tags: string[] }
 
 export type ApiConfig = { baseUrl: string; model: string; apiKey: string }
 
@@ -53,6 +53,7 @@ const books = {
   setColor: (id: string, color: string): Promise<void> => invoke('book_color', { id, color }),
   setCover: (id: string, name: string | null): Promise<void> => invoke('book_cover', { id, name }),
   setSummary: (id: string, summary: string): Promise<void> => invoke('book_summary', { id, summary }),
+  setTags: (id: string, tags: string[]): Promise<void> => invoke('book_tags', { id, tags }),
   remove: (id: string): Promise<string | null> => invoke('book_remove', { id })
 }
 

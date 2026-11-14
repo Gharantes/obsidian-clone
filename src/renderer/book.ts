@@ -3,7 +3,7 @@ import { EditorState, type StateEffect } from '@codemirror/state'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import type { Book, Entry } from './api.ts'
 import { createAi } from './ai.ts'
-import { createAssets } from './assets.ts'
+import { createAssets, pickImage } from './assets.ts'
 import { createDetails, type DetailsOpts } from './details.ts'
 import { createExplorer, find, movePath, parentOf } from './explorer.ts'
 import { createFolderPage, type FolderPage } from './folderPage.ts'
@@ -11,7 +11,7 @@ import { livePreview } from './livePreview.ts'
 import { isFolderNote } from './sections.ts'
 import { openSettings } from './settings.ts'
 import { createTabBar, DETAILS_TAB, imageName, imageTab, loadTabs, nextTab, saveTabs } from './tabs.ts'
-import { h } from './ui.ts'
+import { h, showMenu } from './ui.ts'
 
 const { api } = window
 
@@ -31,6 +31,49 @@ type EditorOpts = {
   imageMenu(ev: MouseEvent, name: string): void
   // For the Details tab's page.
   details: DetailsOpts
+}
+
+// Right-click in a note's text: Cut, Copy and Paste (it replaces the browser's own menu), and
+// Insert image…, which embeds a picked image as ![[name]] where the note was clicked.
+function textMenu(book: string) {
+  return EditorView.domEventHandlers({
+    contextmenu(ev, view) {
+      // Clicking outside the selection moves the cursor there, as in other editors.
+      const pos = view.posAtCoords({ x: ev.clientX, y: ev.clientY })
+      const sel = view.state.selection.main
+      if (pos !== null && (pos < sel.from || pos > sel.to)) view.dispatch({ selection: { anchor: pos } })
+      view.focus()
+      const selected = !view.state.selection.main.empty
+      const insert = (text: string) => {
+        view.dispatch(view.state.replaceSelection(text))
+        view.focus()
+      }
+      showMenu(ev, [
+        ...(selected
+          ? [
+              { label: 'Cut', run: () => document.execCommand('cut') },
+              { label: 'Copy', run: () => document.execCommand('copy') }
+            ]
+          : []),
+        { label: 'Paste', run: () => navigator.clipboard.readText().then(insert, () => {}) },
+        '-',
+        {
+          label: 'Insert image…',
+          async run() {
+            // Inserted after any selected text rather than over it.
+            const end = view.state.selection.main.to
+            const name = await pickImage(book, 'Insert image')
+            if (!name || !view.dom.isConnected) return
+            const at = Math.min(end, view.state.doc.length)
+            const embed = `![[${name}]]`
+            view.dispatch({ changes: { from: at, insert: embed }, selection: { anchor: at + embed.length } })
+            view.focus()
+          }
+        }
+      ])
+      return true
+    }
+  })
 }
 
 // The open tabs and the active one's note: one editor, or for a folder note the folder's page of
@@ -74,6 +117,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     markdown({ base: markdownLanguage }),
     livePreview({ url: (name) => api.images.url(book, name), open: (name) => open(imageTab(name), true) }),
     ai.extension,
+    textMenu(book),
     EditorView.lineWrapping,
     EditorView.updateListener.of((u) => {
       if (u.focusChanged && u.view.hasFocus) focused = u.view

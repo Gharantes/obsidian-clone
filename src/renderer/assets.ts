@@ -21,6 +21,43 @@ type Dragged = { image: string } | { folder: string }
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 const under = (p: string, folder: string) => p === folder || p.startsWith(folder + '/')
 
+// Picks one of the book's images in a dialog, filtered by typing part of its name or folder;
+// resolves to its name, or null when cancelled.
+export async function pickImage(book: string, title: string, current: string | null = null): Promise<string | null> {
+  const { images } = await api.images.list().catch(() => ({ images: [] as [string, string][] }))
+  return new Promise((resolve) => {
+    let chosen: string | null = null
+    const pick = (name: string) => {
+      chosen = name
+      dlg.close()
+    }
+    const buttons = images.map(([name, folder]) => {
+      const label = folder ? `${folder}/${name}` : name
+      const b = h('button', { class: name === current ? 'on' : '', title: label, onclick: () => pick(name) },
+        h('img', { src: api.images.url(book, name), alt: name, loading: 'lazy' })
+      )
+      b.dataset.label = label.toLowerCase()
+      return b
+    })
+    const grid = h('div', { class: 'image-grid' }, ...buttons)
+    const none = h('p', { class: 'muted', textContent: 'No image matches.', hidden: true })
+    const filter = h('input', { placeholder: 'Filter by name', spellcheck: false })
+    filter.oninput = () => {
+      const q = filter.value.trim().toLowerCase()
+      for (const b of buttons) b.hidden = !b.dataset.label!.includes(q)
+      none.hidden = buttons.some((b) => !b.hidden)
+    }
+    // Enter picks the first image shown.
+    filter.onkeydown = (k) => {
+      const first = buttons.find((b) => !b.hidden)
+      if (k.key === 'Enter' && first) first.click()
+    }
+    const body = images.length ? [filter, grid, none] : [h('p', { class: 'muted', textContent: 'This book has no images yet. Add some in the Assets panel, or generate them with AI.' })]
+    const dlg = modal(title, body, [h('button', { textContent: 'Cancel', onclick: () => dlg.close() })], () => resolve(chosen))
+    if (images.length) filter.focus()
+  })
+}
+
 // The sidebar's tree of the book's images, in folders that only organize images. Clicking an image
 // opens it in a tab (Ctrl+click or middle-click: a new tab); right-click for actions; drag to move,
 // or drag an image into a note to embed it. Reloads each time it's shown, so new AI images appear.

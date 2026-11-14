@@ -1,25 +1,9 @@
 import type { Book } from './api.ts'
 import { generateCover } from './library.ts'
-import { h, modal, showMenu } from './ui.ts'
+import { pickImage } from './assets.ts'
+import { h, showMenu } from './ui.ts'
 
 const { api } = window
-
-// Picks one of the book's images; resolves to its name, or null when cancelled.
-async function pickImage(book: string, current: string | null): Promise<string | null> {
-  const { images } = await api.images.list()
-  return new Promise((resolve) => {
-    let chosen: string | null = null
-    const grid = h('div', { class: 'image-grid' })
-    for (const [name, folder] of images) {
-      const b = h('button', { class: name === current ? 'on' : '', title: folder ? `${folder}/${name}` : name, onclick: () => ((chosen = name), dlg.close()) },
-        h('img', { src: api.images.url(book, name), alt: name, loading: 'lazy' })
-      )
-      grid.append(b)
-    }
-    const body = images.length ? grid : h('p', { class: 'muted', textContent: 'This book has no images yet. Upload one or generate one instead.' })
-    const dlg = modal('Choose cover image', [body], [h('button', { textContent: 'Cancel', onclick: () => dlg.close() })], () => resolve(chosen))
-  })
-}
 
 export type DetailsOpts = {
   // Called after the book is renamed.
@@ -127,7 +111,7 @@ export function createDetails(initial: Book, o: DetailsOpts) {
     if (r.names[0]) await setCover(r.names[0])
   }
   const choose = async () => {
-    const name = await pickImage(book.id, book.cover)
+    const name = await pickImage(book.id, 'Choose cover image', book.cover)
     if (name) await setCover(name)
   }
   const generate = async () => {

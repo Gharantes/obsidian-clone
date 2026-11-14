@@ -55,7 +55,11 @@ export function modal(title: string, body: Node[], footer: HTMLElement[], onClos
     onClose?.()
   }
   const onKey = (k: KeyboardEvent) => k.key === 'Escape' && close()
-  backdrop.onmousedown = (ev) => ev.target === backdrop && close()
+  // Braces, not `a && b`: an on* handler that returns false cancels the event, which stopped
+  // selects (and clicks into inputs) from working inside dialogs.
+  backdrop.onmousedown = (ev) => {
+    if (ev.target === backdrop) close()
+  }
   document.addEventListener('keydown', onKey)
   document.body.append(backdrop)
   return { box, close }

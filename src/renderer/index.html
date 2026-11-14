@@ -43,6 +43,9 @@
       .book b { margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .book small { color: var(--muted); }
       .book.dragging { opacity: 0.35; }
+      .book.ghost { position: fixed; left: 0; top: 0; z-index: 100; pointer-events: none; opacity: 0.9; }
+      .book.ghost .cover { transform: rotate(2deg) scale(1.03); box-shadow: 0 8px 16px #0003, 0 24px 40px #0004; }
+      .library.dragging-book, .library.dragging-book * { user-select: none; cursor: grabbing; }
       .shelves { max-width: 1200px; margin: 0 auto; }
       .section-head { display: flex; align-items: center; gap: 8px; margin: 40px 0 16px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
       .section-head h2 { font-size: 17px; margin: 0; }

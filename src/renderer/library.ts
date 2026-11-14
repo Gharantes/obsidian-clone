@@ -150,49 +150,108 @@ export async function showLibrary(root: HTMLElement): Promise<void> {
   let sections: Section[] = []
 
   // Dragging a book moves it among the others as it goes, across sections too; dropping saves
-  // where it landed. Reordering needs every book on show, so it's off while searching.
+  // where it landed, Esc puts it back. It follows the pointer by hand rather than with the
+  // browser's drag and drop, which blocks the scroll wheel; holding it near the top or bottom of
+  // the page scrolls too. Reordering needs every book on show, so it's off while searching.
   let dragged: HTMLElement | null = null
   const draggable = (el: HTMLElement, id: string) => {
-    el.draggable = true
     el.dataset.id = id
-    el.ondragstart = (ev) => {
-      dragged = el
-      ev.dataTransfer!.effectAllowed = 'move'
-      requestAnimationFrame(() => el.classList.add('dragging'))
-    }
-    el.ondragover = (ev) => {
-      if (!dragged) return
-      ev.preventDefault()
-      if (dragged === el) return
+    el.ondragstart = (ev) => ev.preventDefault()
+    el.onpointerdown = (down) => {
+      if (down.button !== 0 || dragged) return
       const r = el.getBoundingClientRect()
-      const after = ev.clientX > r.left + r.width / 2
-      if (after ? el.nextElementSibling !== dragged : el.previousElementSibling !== dragged) el[after ? 'after' : 'before'](dragged)
+      const dx = down.clientX - r.left
+      const dy = down.clientY - r.top
+      let x = down.clientX
+      let y = down.clientY
+      let ghost: HTMLElement | null = null
+      let frame = 0
+
+      // Moves the book to where the pointer is over the grids.
+      const place = () => {
+        const over = document.elementFromPoint(x, y)
+        const target = over?.closest<HTMLElement>('.book[data-id]')
+        if (target && shelves.contains(target)) {
+          if (target === el) return
+          const t = target.getBoundingClientRect()
+          const after = x > t.left + t.width / 2
+          if (after ? target.nextElementSibling !== el : target.previousElementSibling !== el) target[after ? 'after' : 'before'](el)
+          return
+        }
+        // Over a grid's empty space after its last book, or an empty section: the book goes at the end.
+        const grid = over?.closest<HTMLElement>('.grid')
+        if (!grid || !shelves.contains(grid) || grid.lastElementChild === el) return
+        const last = grid.lastElementChild?.getBoundingClientRect()
+        if (!last || y > last.bottom || (y >= last.top && x > last.right)) grid.append(el)
+      }
+      // Scrolls while the pointer is held near the top or bottom edge, faster nearer the edge.
+      const edgeScroll = () => {
+        const box = root.getBoundingClientRect()
+        const edge = 70
+        const speed = y < box.top + edge ? -(box.top + edge - y) : y > box.bottom - edge ? y - (box.bottom - edge) : 0
+        if (speed) root.scrollTop += Math.min(Math.max(speed, -edge), edge) / 3
+        frame = requestAnimationFrame(edgeScroll)
+      }
+      const start = () => {
+        dragged = el
+        ghost = el.cloneNode(true) as HTMLElement
+        ghost.className = 'book ghost'
+        ghost.removeAttribute('data-id')
+        ghost.style.width = `${r.width}px`
+        document.body.append(ghost)
+        el.classList.add('dragging')
+        root.classList.add('dragging-book')
+        frame = requestAnimationFrame(edgeScroll)
+      }
+      const move = (ev: PointerEvent) => {
+        x = ev.clientX
+        y = ev.clientY
+        if (!dragged) {
+          if (Math.hypot(x - down.clientX, y - down.clientY) < 6) return
+          start()
+        }
+        ghost!.style.transform = `translate(${x - dx}px, ${y - dy}px)`
+        place()
+      }
+      const finish = async (save: boolean) => {
+        window.removeEventListener('pointermove', move)
+        window.removeEventListener('pointerup', up)
+        window.removeEventListener('pointercancel', cancel)
+        window.removeEventListener('keydown', key, true)
+        root.removeEventListener('scroll', place)
+        if (!dragged) return
+        cancelAnimationFrame(frame)
+        ghost!.remove()
+        el.classList.remove('dragging')
+        root.classList.remove('dragging-book')
+        dragged = null
+        // Letting go fires a click on the book, which would open it.
+        const swallow = (c: MouseEvent) => (c.stopPropagation(), c.preventDefault())
+        window.addEventListener('click', swallow, true)
+        setTimeout(() => window.removeEventListener('click', swallow, true))
+        if (!save) return render()
+        const grid = el.parentElement!
+        const section = grid.dataset.section || null
+        const ids = [...grid.querySelectorAll<HTMLElement>('.book[data-id]')].map((b) => b.dataset.id!)
+        const was = books.filter((b) => b.section === section).map((b) => b.id)
+        if (ids.join() !== was.join()) await api.books.reorder(section, ids)
+        await reload()
+      }
+      const up = () => finish(true)
+      const cancel = () => finish(false)
+      const key = (k: KeyboardEvent) => {
+        if (k.key === 'Escape' && dragged) {
+          k.stopPropagation()
+          finish(false)
+        }
+      }
+      window.addEventListener('pointermove', move)
+      window.addEventListener('pointerup', up)
+      window.addEventListener('pointercancel', cancel)
+      window.addEventListener('keydown', key, true)
+      // The wheel scrolls the page under a still pointer; keep the book under it.
+      root.addEventListener('scroll', place)
     }
-    el.ondrop = (ev) => ev.preventDefault()
-    el.ondragend = async (ev) => {
-      el.classList.remove('dragging')
-      dragged = null
-      // Dropped outside the grids (or cancelled with Esc): put everything back.
-      if (ev.dataTransfer?.dropEffect === 'none') return render()
-      const grid = el.parentElement!
-      const section = grid.dataset.section || null
-      const ids = [...grid.querySelectorAll<HTMLElement>('.book[data-id]')].map((b) => b.dataset.id!)
-      const was = books.filter((b) => b.section === section).map((b) => b.id)
-      if (ids.join() !== was.join()) await api.books.reorder(section, ids)
-      await reload()
-    }
-  }
-  // Over a grid's empty space after its last book, or an empty section: the book goes at the end.
-  const dropZone = (grid: HTMLElement) => {
-    grid.ondragover = (ev) => {
-      if (!dragged) return
-      ev.preventDefault()
-      const last = grid.lastElementChild
-      if (last === dragged) return
-      const r = last?.getBoundingClientRect()
-      if (!r || ev.clientY > r.bottom || (ev.clientY >= r.top && ev.clientX > r.right)) grid.append(dragged)
-    }
-    grid.ondrop = (ev) => ev.preventDefault()
   }
 
   const sectionMenu = (s: Section) => (ev: MouseEvent) =>
@@ -222,7 +281,6 @@ export async function showLibrary(root: HTMLElement): Promise<void> {
     })
     const add = h('button', { class: 'book add', onclick: () => newBook(covers) }, h('div', { class: 'cover' }, h('span', { textContent: '+' })), h('b', { textContent: 'New book' }))
     grid.replaceChildren(...(q || section ? [] : [add]), ...cards)
-    if (!q) dropZone(grid)
     if (!section) return [grid]
     const menu = sectionMenu(section)
     const head = h('div', { class: 'section-head' },

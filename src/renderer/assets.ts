@@ -14,10 +14,16 @@ type AssetsOpts = {
   renamed(from: string, to: string): void
   // Called with the paths of deleted images.
   deleted(paths: string[]): void
+  // Opens the Assets page tab, the images in a grid (see createGallery).
+  gallery(): void
+  // Called after the images were reread, so the Assets page can follow.
+  loaded(): void
 }
 
 // What's being dragged in the list: an image or a folder, by path.
 type Dragged = { image: string } | { folder: string }
+
+const GRID = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>'
 
 const baseName = (p: string) => p.slice(p.lastIndexOf('/') + 1)
 const under = (p: string, folder: string) => p === folder || p.startsWith(folder + '/')
@@ -160,6 +166,7 @@ export function createAssets(o: AssetsOpts) {
     if (n !== loads) return
     ;({ folders, images } = r)
     redraw()
+    o.loaded()
   }
 
   function toggle(path: string) {
@@ -307,7 +314,78 @@ export function createAssets(o: AssetsOpts) {
 
   const actions = h('div', { class: 'actions' },
     h('button', { textContent: '+ Images', title: 'Add image files', onclick: () => addImages('') }),
-    h('button', { textContent: '+ Folder', title: 'New folder for images', onclick: () => newFolder('') })
+    h('button', { textContent: '+ Folder', title: 'New folder for images', onclick: () => newFolder('') }),
+    h('button', { class: 'grid-view', innerHTML: GRID, title: 'Show all images in a grid', onclick: () => o.gallery() })
   )
   return { el: h('div', { class: 'panel' }, actions, list), load, select, menu }
+}
+
+type GalleryOpts = {
+  // Opens an image tab (see imageTab).
+  open(path: string, newTab: boolean): void
+  // An image's right-click actions (createAssets' menu).
+  menu(ev: MouseEvent, path: string): void
+}
+
+// The Assets page a tab can show: every image in the book as a grid of thumbnails, one section per
+// folder, filtered by typing part of a path. Clicking an image opens it in this tab (Ctrl+click or
+// middle-click: a new tab); right-click for its actions. load() rereads the images.
+export function createGallery(book: string, o: GalleryOpts) {
+  const sections = h('div', { class: 'gallery-sections' })
+  const none = h('p', { class: 'muted', hidden: true })
+  const filter = h('input', { placeholder: 'Filter by name or folder', spellcheck: false })
+  let loads = 0
+
+  const tile = (name: string, folder: string) => {
+    const path = imagePath(name, folder)
+    const b = h('button', { class: 'gallery-tile', title: path },
+      h('img', { src: api.images.url(book, path), alt: name, loading: 'lazy' }),
+      h('span', { textContent: name })
+    )
+    b.dataset.label = path.toLowerCase()
+    b.onclick = (ev) => o.open(imageTab(path), ev.ctrlKey || ev.metaKey)
+    b.onmousedown = (ev) => {
+      if (ev.button === 1) ev.preventDefault() // no middle-click autoscroll
+    }
+    b.onauxclick = (ev) => ev.button === 1 && o.open(imageTab(path), true)
+    b.oncontextmenu = (ev) => o.menu(ev, path)
+    return b
+  }
+
+  // Shows the images whose path holds the filter's text, and the sections that have any.
+  const apply = () => {
+    const q = filter.value.trim().toLowerCase()
+    let shown = 0
+    for (const s of sections.children) {
+      const tiles = [...s.querySelectorAll<HTMLElement>('.gallery-tile')]
+      for (const t of tiles) t.hidden = !t.dataset.label!.includes(q)
+      const n = tiles.filter((t) => !t.hidden).length
+      ;(s as HTMLElement).hidden = !n
+      shown += n
+    }
+    if (!sections.children.length) none.textContent = 'This book has no images yet. Add some in the Assets panel, or generate them with AI.'
+    else none.textContent = 'No image matches.'
+    none.hidden = !!shown
+  }
+
+  async function load() {
+    const n = ++loads
+    const { images } = await api.images.list().catch(() => ({ images: [] as [string, string][] }))
+    if (n !== loads) return
+    const byFolder = new Map<string, string[]>()
+    for (const [name, folder] of images) byFolder.set(folder, [...(byFolder.get(folder) ?? []), name])
+    const folders = [...byFolder.keys()].sort((a, b) => (a ? b ? a.localeCompare(b) : 1 : -1))
+    sections.replaceChildren(...folders.map((folder) =>
+      h('section', {},
+        ...(folders.length > 1 || folder ? [h('h3', { textContent: folder || 'Top level' })] : []),
+        h('div', { class: 'gallery-grid' }, ...byFolder.get(folder)!.map((name) => tile(name, folder)))
+      )
+    ))
+    apply()
+  }
+
+  filter.oninput = apply
+  load()
+  const el = h('div', { class: 'details-page gallery-page' }, h('header', {}, filter), sections, none)
+  return { el, load }
 }

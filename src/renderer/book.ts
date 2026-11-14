@@ -3,12 +3,12 @@ import { EditorState, type StateEffect } from '@codemirror/state'
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import type { Book, Entry } from './api.ts'
 import { createAi } from './ai.ts'
-import { createAssets, pickImage } from './assets.ts'
+import { createAssets, createGallery, pickImage } from './assets.ts'
 import { createDetails, type DetailsOpts } from './details.ts'
 import { createExplorer, find, movePath } from './explorer.ts'
 import { livePreview } from './livePreview.ts'
 import { openSettings } from './settings.ts'
-import { createTabBar, DETAILS_TAB, imageName, imageTab, loadTabs, nextTab, PAGE_TABS, saveTabs, TAGS_TAB } from './tabs.ts'
+import { createTabBar, DETAILS_TAB, GALLERY_TAB, imageName, imageTab, loadTabs, nextTab, PAGE_TABS, saveTabs, TAGS_TAB } from './tabs.ts'
 import { createTags } from './tags.ts'
 import { h, showMenu } from './ui.ts'
 
@@ -28,7 +28,7 @@ type EditorOpts = {
   refresh(): void
   // Shows the sidebar panel listing the tab's note or image (a Ctrl+click or Ctrl+Tab to it).
   reveal(path: string | null): void
-  // Right-click on an image tab's image, by the image's path.
+  // Right-click on an image tab's image (or the Assets page's), by the image's path.
   imageMenu(ev: MouseEvent, path: string): void
   // For the Details tab's page.
   details: DetailsOpts
@@ -92,6 +92,8 @@ function createEditor(main: HTMLElement, pane: HTMLElement, book: string, o: Edi
   let details: ReturnType<typeof createDetails> | null = null
   // The Tags tab's page, in place of the editor.
   let tagsPage: ReturnType<typeof createTags> | null = null
+  // The Assets tab's page (the images in a grid), in place of the editor.
+  let gallery: ReturnType<typeof createGallery> | null = null
   let tree: Entry[] = []
   let timer: ReturnType<typeof setTimeout> | undefined
   const save = () => {
@@ -151,7 +153,8 @@ function createEditor(main: HTMLElement, pane: HTMLElement, book: string, o: Edi
     image?.remove()
     details?.destroy()
     tagsPage?.destroy()
-    image = details = tagsPage = null
+    gallery?.el.remove()
+    image = details = tagsPage = gallery = null
     current = null
   }
 
@@ -177,6 +180,12 @@ function createEditor(main: HTMLElement, pane: HTMLElement, book: string, o: Edi
       if (n !== loads || !b) return
       tagsPage = createTags(b)
       pane.append(tagsPage.el)
+      return
+    }
+    if (path === GALLERY_TAB) {
+      view.dom.hidden = true
+      gallery = createGallery(book, { open, menu: o.imageMenu })
+      pane.append(gallery.el)
       return
     }
     const imagePath = imageName(path)
@@ -281,6 +290,8 @@ function createEditor(main: HTMLElement, pane: HTMLElement, book: string, o: Edi
     deleted,
     // Saves pending edits now, before notes are changed behind the editor's back.
     flush: () => timer && save(),
+    // Rereads the Assets page's images, if it's shown.
+    imagesChanged: () => gallery?.load(),
     // Rereads the active tab's note (or image) after it changed behind the editor's back.
     reload() {
       leave()
@@ -433,7 +444,9 @@ export function showBook(root: HTMLElement, book: Book): void {
       editor.renamed(imageTab(from), imageTab(to))
       editor.reload() // its embeds may have changed
     },
-    deleted: (paths) => paths.forEach((p) => editor.deleted(imageTab(p)))
+    deleted: (paths) => paths.forEach((p) => editor.deleted(imageTab(p))),
+    gallery: () => editor.page(GALLERY_TAB),
+    loaded: () => editor.imagesChanged()
   })
   const ribbon = createRibbon(nav, book.id, [
     { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) },

@@ -5,11 +5,12 @@ import { h, showMenu } from './ui.ts'
 const IMAGE = 'image:'
 export const imageTab = (path: string) => IMAGE + path
 export const imageName = (path: string | null) => (path?.startsWith(IMAGE) ? path.slice(IMAGE.length) : null)
-// The tabs showing the book's Details page and its Tags page.
+// The tabs showing the book's Details page, its Tags page and its Assets page (the images in a grid).
 export const DETAILS_TAB = 'details:'
 export const TAGS_TAB = 'tags:'
+export const GALLERY_TAB = 'gallery:'
 // Tabs that show one of the book's pages rather than a note or image, by their titles.
-export const PAGE_TABS: Record<string, string> = { [DETAILS_TAB]: 'Details', [TAGS_TAB]: 'Tags' }
+export const PAGE_TABS: Record<string, string> = { [DETAILS_TAB]: 'Details', [TAGS_TAB]: 'Tags', [GALLERY_TAB]: 'Assets' }
 
 // "Scene" for "Chapter 1/Scene.md"; an image tab is the image's file name, a page tab its
 // page's title ("Details") and a tab with no note "New tab".

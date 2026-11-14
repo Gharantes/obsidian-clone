@@ -266,13 +266,35 @@ export async function openSettings(): Promise<void> {
     }
   })
 
-  // A sidebar of pages; clicking one shows it in place of the others.
-  const pages: [string, Node[]][] = [
-    ['AI Writing', [claude, ...apis.map((x) => x.el)]],
-    ['AI Images', [pollinations, cloudflare, imageOpenai]]
+  // Export: a book (the open one, in a book window) saved as a .zip of folders of .md files.
+  const [books, current] = await Promise.all([api.books.list(), api.books.current()])
+  const exportBook = select(Object.fromEntries(books.map((b) => [b.id, b.title])), current?.id ?? books[0]?.id ?? '', 'Book to export')
+  const exportResult = h('p', { class: 'hint' })
+  const exportButton = h('button', {
+    textContent: 'Export…',
+    disabled: !books.length,
+    onclick: async () => {
+      exportButton.disabled = true
+      const err = await api.books.export(exportBook.value)
+      exportButton.disabled = false
+      exportResult.className = err ? 'error' : 'hint'
+      exportResult.textContent = err ?? ''
+    }
+  })
+  const exportPage = [
+    h('p', { class: 'hint', textContent: books.length ? 'Saves a book as a .zip: its notes as folders of .md files, with images in attachments/. Import it again from the Library.' : 'There are no books to export yet.' }),
+    field('Book', exportBook),
+    h('div', { class: 'row-input' }, exportButton, exportResult)
   ]
-  const hint = h('p', { class: 'hint', textContent: 'Choose which provider and model to use in the AI sidebar.' })
-  const views = pages.map(([, body]) => h('div', { class: 'settings-page' }, hint.cloneNode(true), ...body))
+
+  // A sidebar of pages; clicking one shows it in place of the others.
+  const aiHint = 'Choose which provider and model to use in the AI sidebar.'
+  const pages: [string, Node[], string?][] = [
+    ['AI Writing', [claude, ...apis.map((x) => x.el)], aiHint],
+    ['AI Images', [pollinations, cloudflare, imageOpenai], aiHint],
+    ['Export', exportPage]
+  ]
+  const views = pages.map(([, body, hint]) => h('div', { class: 'settings-page' }, ...(hint ? [h('p', { class: 'hint', textContent: hint })] : []), ...body))
   const tabs = pages.map(([name], i) => h('button', { textContent: name, onclick: () => show(i) }))
   const show = (i: number) => {
     views.forEach((v, j) => (v.hidden = j !== i))

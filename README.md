@@ -6,7 +6,7 @@ A clone of [Obsidian](https://obsidian.md), the Markdown knowledge base app, sha
   of Markdown notes. Books live in one SQLite database (`library.db` in the app's config folder), not in folders.
 - **Books**: notes are organized in Obsidian's *folder note* style: a folder `Chapter 1` with a note
   `Chapter 1/Chapter 1.md` shows as one item that opens its note. Right-click a note → *New note inside* to nest notes
-  under it; drag items to move them. Right-click a book → *Export as .zip* to get it as folders of `.md` files.
+  under it; drag items to move them. Right-click a book → *Export as .zip* (or use Settings → *Export*) to get it as folders of `.md` files.
 - **Tabs**: open as many notes as you like, or none. Ctrl+click or middle-click a note to open it in a new tab;
   **Ctrl+T** new tab, **Ctrl+W** close, **Ctrl+Tab** next. Drag tabs to reorder; they reopen with the book.
 - **AI writing**: in a note press **Ctrl+J** (or the ✨ AI button) to open the AI chat sidebar. Ask for anything —

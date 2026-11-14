@@ -4,18 +4,19 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import type { Book, Entry } from './api.ts'
 import { createAi } from './ai.ts'
 import { createAssets } from './assets.ts'
-import { createDetails } from './details.ts'
+import { createDetails, type DetailsOpts } from './details.ts'
 import { createExplorer, find, movePath, parentOf } from './explorer.ts'
 import { createFolderPage, type FolderPage } from './folderPage.ts'
 import { livePreview } from './livePreview.ts'
 import { isFolderNote } from './sections.ts'
 import { openSettings } from './settings.ts'
-import { createTabBar, imageName, imageTab, loadTabs, nextTab, saveTabs } from './tabs.ts'
+import { createTabBar, DETAILS_TAB, imageName, imageTab, loadTabs, nextTab, saveTabs } from './tabs.ts'
 import { h } from './ui.ts'
 
 const { api } = window
 
-// An open tab: a note, an image (see imageTab), or empty (path null). While another tab is shown
+// An open tab: a note, an image (see imageTab), the book's Details page (DETAILS_TAB), or empty
+// (path null). While another tab is shown
 // it keeps the note's editor state (with its undo history) and scroll position.
 type Tab = { path: string | null; state?: EditorState; scroll?: StateEffect<unknown>; pageScroll?: number }
 
@@ -28,6 +29,8 @@ type EditorOpts = {
   refresh(): void
   // Right-click on an image tab's image.
   imageMenu(ev: MouseEvent, name: string): void
+  // For the Details tab's page.
+  details: DetailsOpts
 }
 
 // The open tabs and the active one's note: one editor, or for a folder note the folder's page of
@@ -42,6 +45,8 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
   let page: FolderPage | null = null
   // The image an image tab shows, in place of the editor.
   let image: HTMLElement | null = null
+  // The Details tab's page, in place of the editor.
+  let details: ReturnType<typeof createDetails> | null = null
   let tree: Entry[] = []
   // The editor the AI changes: the note, or the folder page's last focused text section.
   let focused: EditorView | null = null
@@ -96,7 +101,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
 
   // "Chapter 1 / Scene" for "Chapter 1/Scene.md"; a folder note shows as its folder.
   const showCrumbs = () => {
-    const name = imageName(active?.path ?? null)
+    const name = active?.path === DETAILS_TAB ? 'Details' : imageName(active?.path ?? null)
     const parts = name ? [name] : active?.path ? active.path.replace(/\.md$/, '').split('/') : []
     if (parts.length > 1 && parts.at(-1) === parts.at(-2)) parts.pop()
     crumbs.replaceChildren(...parts.flatMap((p, i) => [...(i ? [h('span', { class: 'sep', textContent: '/' })] : []), h('span', { textContent: p })]))
@@ -112,7 +117,8 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     }
     page?.destroy()
     image?.remove()
-    page = focused = image = null
+    details?.destroy()
+    page = focused = image = details = null
     current = null
   }
 
@@ -125,6 +131,14 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     o.selected(path)
     main.classList.toggle('empty', !path)
     const n = ++loads
+    if (path === DETAILS_TAB) {
+      view.dom.hidden = true
+      const b = await api.books.current()
+      if (n !== loads || !b) return
+      details = createDetails(b, o.details)
+      pane.append(details.el)
+      return
+    }
     const name = imageName(path)
     if (name) {
       const img = h('img', { src: api.images.url(book, name), alt: name })
@@ -202,6 +216,12 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
     ai,
     bar: bar.el,
     newTab: () => add(null),
+    // Shows the Details tab, opening it after the active tab if it isn't open.
+    details() {
+      const tab = tabs.find((t) => t.path === DETAILS_TAB)
+      if (tab) activate(tab)
+      else add(DETAILS_TAB)
+    },
     closeTab: () => active && closeWhere((t) => t === active),
     // Shows the tab `by` places to the right (negative: left), wrapping around.
     cycle(by: number) {
@@ -231,7 +251,7 @@ function createEditor(main: HTMLElement, pane: HTMLElement, crumbs: HTMLElement,
       restored = true
       const saved = loadTabs(book)
       const all: Tab[] = saved.paths.map((path) => ({ path }))
-      const missing = (tab: Tab) => !!tab.path && !imageName(tab.path) && !find(t, tab.path)
+      const missing = (tab: Tab) => !!tab.path && tab.path !== DETAILS_TAB && !imageName(tab.path) && !find(t, tab.path)
       active = nextTab(all, all[saved.active] ?? null, missing)
       tabs = all.filter((tab) => !missing(tab))
       load()
@@ -308,17 +328,11 @@ export function showBook(root: HTMLElement, book: Book): void {
     },
     deleted: (names) => names.forEach((n) => editor.deleted(imageTab(n)))
   })
-  const details = createDetails(book, {
-    renamed(title) {
-      document.title = bookTitle.textContent = title
-    },
-    imagesChanged: () => assets.load()
-  })
   const ribbon = createRibbon(nav, book.id, [
     { id: 'files', title: 'Files', icon: icons.folder, el: h('div', { class: 'panel' }, h('div', { class: 'actions' }, newNote, newFolder), tree) },
-    { id: 'assets', title: 'Assets', icon: icons.image, el: assets.el, shown: assets.load },
-    { id: 'details', title: 'Details', icon: icons.details, el: details.el, shown: details.shown }
+    { id: 'assets', title: 'Assets', icon: icons.image, el: assets.el, shown: assets.load }
   ])
+  ribbon.append(h('button', { class: 'icon', title: 'Details', innerHTML: icons.details, onclick: () => editor.details() }))
   ribbon.append(h('button', { class: 'icon settings', textContent: '⚙', title: 'Settings', onclick: () => openSettings() }))
   root.replaceChildren(ribbon, nav, main)
   const editor = createEditor(main, pane, crumbs, book.id, {
@@ -328,7 +342,13 @@ export function showBook(root: HTMLElement, book: Book): void {
       assets.select(path)
     },
     refresh: () => explorer.refresh(),
-    imageMenu: (ev, name) => assets.menu(ev, name)
+    imageMenu: (ev, name) => assets.menu(ev, name),
+    details: {
+      renamed(title) {
+        document.title = bookTitle.textContent = title
+      },
+      imagesChanged: () => assets.load()
+    }
   })
   main.append(
     editor.bar,

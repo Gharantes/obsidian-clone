@@ -5,11 +5,14 @@ import { h, showMenu } from './ui.ts'
 const IMAGE = 'image:'
 export const imageTab = (name: string) => IMAGE + name
 export const imageName = (path: string | null) => (path?.startsWith(IMAGE) ? path.slice(IMAGE.length) : null)
+// The tab showing the book's Details page.
+export const DETAILS_TAB = 'details:'
 
 // "Scene" for "Chapter 1/Scene.md" (a folder note "A/A.md" is "A"); an image tab is the image's
-// name and a tab with no note is "New tab".
+// name, the Details tab "Details" and a tab with no note "New tab".
 export function tabTitle(path: string | null): string {
   if (!path) return 'New tab'
+  if (path === DETAILS_TAB) return 'Details'
   return imageName(path) ?? path.slice(path.lastIndexOf('/') + 1).replace(/\.md$/, '')
 }
 

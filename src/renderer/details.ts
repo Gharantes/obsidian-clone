@@ -21,15 +21,15 @@ async function pickImage(book: string, current: string | null): Promise<string |
   })
 }
 
-type DetailsOpts = {
+export type DetailsOpts = {
   // Called after the book is renamed.
   renamed(title: string): void
   // Called after an image was added to the book (an upload or generated cover).
   imagesChanged(): void
 }
 
-// The sidebar's Details panel: the book's title (edit to rename), its cover, and a summary.
-// Rereads the book each time it's shown, since its cover image may have been renamed or deleted.
+// The Details page a tab can show: the book's title (edit to rename), its cover, and a summary.
+// Made afresh each time the tab is shown; destroy() saves any pending edits.
 export function createDetails(initial: Book, o: DetailsOpts) {
   let book = initial
   const title = h('input', { class: 'details-title', value: book.title, title: 'Book title', spellcheck: false })
@@ -57,14 +57,17 @@ export function createDetails(initial: Book, o: DetailsOpts) {
   }
 
   // Title: saved on Enter or when leaving the box; Escape undoes the edit.
+  let renaming = false
   const rename = async () => {
     const v = title.value.trim()
+    if (renaming) return
     if (!v || v === book.title) {
       title.value = book.title
       titleError.textContent = ''
       return
     }
-    const err = await api.books.rename(book.id, v)
+    renaming = true
+    const err = await api.books.rename(book.id, v).finally(() => (renaming = false))
     titleError.textContent = err ?? ''
     if (err) return
     book.title = title.value = v
@@ -77,7 +80,8 @@ export function createDetails(initial: Book, o: DetailsOpts) {
     else if (k.key === 'Escape') {
       title.value = book.title
       title.blur()
-    }
+    } else return
+    k.preventDefault()
   }
 
   // Summary: autosaved 500 ms after the last change, and when leaving the box.
@@ -96,7 +100,8 @@ export function createDetails(initial: Book, o: DetailsOpts) {
     timer = setTimeout(saveSummary, 500)
   }
   summary.onblur = saveSummary
-  window.addEventListener('beforeunload', () => timer && saveSummary())
+  const unload = () => timer && saveSummary()
+  window.addEventListener('beforeunload', unload)
 
   const setCover = async (name: string | null) => {
     await api.books.setCover(book.id, name)
@@ -146,20 +151,27 @@ export function createDetails(initial: Book, o: DetailsOpts) {
   cover.title = 'Choose cover image'
 
   paint()
-  const el = h('div', { class: 'panel details' },
-    title,
-    titleError,
-    h('h3', { textContent: 'Cover' }),
-    cover,
-    h('div', { class: 'cover-actions' }, imageButton, removeImage),
-    h('small', { class: 'muted', textContent: 'Color, shown when there is no image' }),
-    swatches,
-    h('h3', { textContent: 'Summary' }),
-    summary,
-    saved
+  const el = h('div', { class: 'details-page' },
+    h('header', {}, title, titleError),
+    h('div', { class: 'details-body' },
+      h('section', { class: 'details-cover' },
+        h('h3', { textContent: 'Cover' }),
+        cover,
+        h('div', { class: 'cover-actions' }, imageButton, removeImage),
+        h('small', { class: 'muted', textContent: 'Color, shown when there is no image' }),
+        swatches
+      ),
+      h('section', { class: 'details-summary' }, h('h3', { textContent: 'Summary' }), summary, saved)
+    )
   )
   return {
     el,
-    shown: () => void reload()
+    // Saves edits not saved yet: removing the page doesn't blur its boxes.
+    destroy() {
+      window.removeEventListener('beforeunload', unload)
+      if (summary.value !== book.summary) saveSummary()
+      if (title.value.trim() && title.value.trim() !== book.title) rename()
+      el.remove()
+    }
   }
 }

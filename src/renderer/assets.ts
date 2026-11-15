@@ -43,7 +43,7 @@ export async function pickImage(book: string, title: string, current: string | n
     const buttons = images.map(([name, folder]) => {
       const path = imagePath(name, folder)
       const b = h('button', { class: path === current ? 'on' : '', title: path, onclick: () => pick(path) },
-        h('img', { src: api.images.url(book, path), alt: name, loading: 'lazy' })
+        h('img', { src: api.images.thumb(book, path), alt: name, loading: 'lazy' })
       )
       b.dataset.label = path.toLowerCase()
       return b
@@ -364,7 +364,7 @@ export function createGallery(book: string, o: GalleryOpts) {
   const tile = (name: string, folder: string) => {
     const path = imagePath(name, folder)
     const b = h('button', { class: 'gallery-tile', title: path },
-      h('img', { src: api.images.url(book, path), alt: name, loading: 'lazy' }),
+      h('img', { src: api.images.thumb(book, path), alt: name, loading: 'lazy' }),
       h('span', { textContent: name })
     )
     b.dataset.label = path.toLowerCase()

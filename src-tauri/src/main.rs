@@ -12,11 +12,10 @@ mod settings;
 use rusqlite::Connection;
 use serde_json::{json, Value};
 use settings::Settings;
-use std::borrow::Cow;
 use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::Mutex;
-use tauri::{AppHandle, Emitter, Manager, RunEvent, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
+use std::path::{Path, PathBuf};
+use std::sync::{mpsc, Arc, Mutex};
+use tauri::{AppHandle, Emitter, Manager, RunEvent, State, UriSchemeResponder, WebviewUrl, WebviewWindow, WebviewWindowBuilder, WindowEvent};
 use tauri_plugin_dialog::DialogExt;
 use tokio_util::sync::CancellationToken;
 
@@ -532,7 +531,31 @@ async fn ai_test(app: AppHandle, system: String, provider: Option<String>) -> Va
     }
 }
 
+// A request for an image: its "<book id>/<image path>", whether it's for the thumbnail, and where
+// the answer goes.
+type ImageJob = (String, bool, UriSchemeResponder);
+
+// Answers image requests on its own thread and database connection, so big images neither hold up
+// the window (the protocol handler runs on its thread) nor wait on the app's lock.
+fn serve_images(file: &Path, jobs: Arc<Mutex<mpsc::Receiver<ImageJob>>>) {
+    let db = books::open_db(file).ok();
+    loop {
+        let Ok((path, thumb, responder)) = jobs.lock().unwrap().recv() else { return };
+        let data = db.as_ref().zip(path.split_once('/')).and_then(|(db, (book, name))| {
+            if thumb { images::thumb(db, book, name) } else { images::get(db, book, name) }.ok().flatten()
+        });
+        let res = tauri::http::Response::builder();
+        let res = match data {
+            Some(data) => res.header("content-type", images::kind(&data).map_or("application/octet-stream", |k| k.1)).body(data),
+            None => res.status(404).body(Vec::new()),
+        };
+        responder.respond(res.unwrap());
+    }
+}
+
 fn main() {
+    let (image_jobs, image_queue) = mpsc::channel::<ImageJob>();
+    let image_queue = Arc::new(Mutex::new(image_queue));
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -545,27 +568,25 @@ fn main() {
             ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_list, image_import, image_import_pixiv, image_remove, image_move, image_folder_create, image_folder_move, image_folder_remove, image_rename, image_save,
             image_generate
         ])
-        // Serves book images at img://localhost/<book id>%2F<image path> (see convertFileSrc in the renderer).
-        .register_uri_scheme_protocol("img", |ctx, req| {
+        // Serves book images at img://localhost/<book id>%2F<image path>, and their thumbnails with
+        // ?thumb (see api.images in the renderer); serve_images answers.
+        .register_asynchronous_uri_scheme_protocol("img", move |_ctx, req, responder| {
             let path = percent_encoding::percent_decode_str(req.uri().path().trim_start_matches('/')).decode_utf8_lossy().into_owned();
-            let data = path.split_once('/').and_then(|(book, name)| {
-                let state = ctx.app_handle().state::<Mutex<App>>();
-                let st = state.lock().unwrap();
-                images::get(&st.db, book, name).ok().flatten()
-            });
-            let res = tauri::http::Response::builder();
-            match data {
-                Some(data) => res.header("content-type", images::kind(&data).map_or("application/octet-stream", |k| k.1)).body(Cow::Owned(data)),
-                None => res.status(404).body(Cow::Owned(Vec::new())),
-            }
-            .unwrap()
+            let _ = image_jobs.send((path, req.uri().query() == Some("thumb"), responder));
         })
-        .setup(|app| {
+        .setup(move |app| {
             let paths = app.path();
             let home = paths.home_dir()?;
             let dir = paths.config_dir()?.join("obsidian-clone");
             std::fs::create_dir_all(&dir)?;
-            let db = books::open_db(&dir.join("library.db"))?;
+            let file = dir.join("library.db");
+            let db = books::open_db(&file)?;
+            // A few, since making a thumbnail decodes the whole image, which takes memory.
+            let workers = std::thread::available_parallelism().map_or(2, |n| n.get() / 2).clamp(2, 4);
+            for _ in 0..workers {
+                let (file, queue) = (file.clone(), image_queue.clone());
+                std::thread::spawn(move || serve_images(&file, queue));
+            }
             let reopen = books::open_ids(&db)?;
             let settings = settings::load_settings(&dir.join("settings.json"));
             app.manage(Mutex::new(App { dir, home, db, settings, windows: HashMap::new(), next_window: 0, jobs: HashMap::new(), quitting: false }));

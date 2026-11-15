@@ -31,6 +31,54 @@ pub fn get(db: &Connection, book: &str, path: &str) -> Result<Option<Vec<u8>>, S
         .map_err(err)
 }
 
+// Thumbnails' short side, in pixels: covers and tiles show images a few hundred pixels across.
+const THUMB_SIDE: u32 = 400;
+// Images smaller than this are their own thumbnail, which also keeps small GIFs moving.
+const THUMB_MIN_BYTES: usize = 256 * 1024;
+
+// A copy of image bytes scaled down to THUMB_SIDE on the short side (JPEG, or PNG when it has
+// see-through pixels); None when it can't be read or is already that small.
+pub fn make_thumb(data: &[u8]) -> Option<Vec<u8>> {
+    let img = image::load_from_memory(data).ok()?;
+    let (w, h) = (img.width() as f64, img.height() as f64);
+    // The long side stops at 4x, so a very long strip doesn't make a huge thumbnail.
+    let scale = (THUMB_SIDE as f64 / w.min(h)).min(4.0 * THUMB_SIDE as f64 / w.max(h));
+    if scale >= 1.0 {
+        return None;
+    }
+    let small = img.thumbnail(((w * scale).round() as u32).max(1), ((h * scale).round() as u32).max(1));
+    let mut out = std::io::Cursor::new(Vec::new());
+    if small.color().has_alpha() && small.to_rgba8().pixels().any(|p| p[3] < 255) {
+        small.write_to(&mut out, image::ImageFormat::Png).ok()?;
+    } else {
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 85).encode_image(&small.to_rgb8()).ok()?;
+    }
+    Some(out.into_inner())
+}
+
+// The bytes to show for an image in a small tile (library covers, the Assets page): a scaled-down
+// copy, made and saved in `thumbs` the first time it's asked for. The row follows the image when
+// it's moved or renamed and goes when it's deleted (see open_db).
+pub fn thumb(db: &Connection, book: &str, path: &str) -> Result<Option<Vec<u8>>, String> {
+    let (folder, name) = (parent_of(path), base_name(path));
+    let saved: Option<Option<Vec<u8>>> =
+        db.query_row("SELECT data FROM thumbs WHERE book = ?1 AND folder = ?2 AND name = ?3", params![book, folder, name], |r| r.get(0)).optional().map_err(err)?;
+    match saved {
+        Some(Some(small)) => return Ok(Some(small)),
+        // Too small, or unreadable: shown as it is.
+        Some(None) => return get(db, book, path),
+        None => {}
+    }
+    let Some(data) = get(db, book, path)? else { return Ok(None) };
+    if data.len() < THUMB_MIN_BYTES {
+        return Ok(Some(data));
+    }
+    let small = make_thumb(&data);
+    // Fails only when the image went in the meantime; it's made again next time otherwise.
+    let _ = db.execute("INSERT OR REPLACE INTO thumbs (book, folder, name, data) VALUES (?1, ?2, ?3, ?4)", params![book, folder, name, small]);
+    Ok(Some(small.unwrap_or(data)))
+}
+
 // Adds an image to a folder ("" = top level; made if missing) unless the folder has one with that name.
 pub fn add(db: &Connection, book: &str, folder: &str, name: &str, data: &[u8]) -> Result<(), String> {
     add_folder(db, book, folder)?;
@@ -514,6 +562,50 @@ mod tests {
         assert_eq!(list(db, "b").unwrap().images.len(), 2, "names now repeat across folders");
         drop(crate::books::open_db(&file).unwrap());
         let _ = std::fs::remove_file(&file);
+    }
+
+    // A PNG of noise, which doesn't compress, so it's over THUMB_MIN_BYTES.
+    fn noise_png(w: u32, h: u32) -> Vec<u8> {
+        let mut seed = 1u32;
+        let img = image::RgbImage::from_fn(w, h, |_, _| {
+            let mut px = [0u8; 3];
+            for c in &mut px {
+                seed = seed.wrapping_mul(1_664_525).wrapping_add(1_013_904_223);
+                *c = (seed >> 24) as u8;
+            }
+            image::Rgb(px)
+        });
+        let mut out = std::io::Cursor::new(Vec::new());
+        img.write_to(&mut out, image::ImageFormat::Png).unwrap();
+        out.into_inner()
+    }
+
+    #[test]
+    fn thumbnails_follow_their_image() {
+        let db = &crate::files::tests::test_db();
+        let big = noise_png(600, 1000);
+        assert!(big.len() > THUMB_MIN_BYTES);
+        add(db, "b", "Art", "Big.png", &big).unwrap();
+        add(db, "b", "", "tiny.png", b"\x89PNG").unwrap();
+        let thumbs = |db: &Connection| db.query_row("SELECT count(*) FROM thumbs", [], |r| r.get::<_, i64>(0)).unwrap();
+
+        let small = thumb(db, "b", "Art/Big.png").unwrap().unwrap();
+        let img = image::load_from_memory(&small).unwrap();
+        assert_eq!((img.width(), img.height(), kind(&small).unwrap().0), (400, 667, "jpg"), "short side 400, as JPEG");
+        assert_eq!(thumb(db, "b", "Art/Big.png").unwrap().unwrap(), small, "saved and reused");
+        assert_eq!(thumb(db, "b", "tiny.png").unwrap().unwrap(), b"\x89PNG", "small images are their own thumbnail");
+        assert_eq!(thumb(db, "b", "gone.png").unwrap(), None);
+        assert_eq!(thumbs(db), 1);
+
+        rename(db, "b", "Art/Big.png", "Moved").unwrap();
+        move_folder(db, "b", Some("Art"), "", "Pictures").unwrap();
+        let path: String = db.query_row("SELECT folder || '/' || name FROM thumbs", [], |r| r.get(0)).unwrap();
+        assert_eq!(path, "Pictures/Moved.png", "moves with its image");
+        remove(db, "b", "Pictures/Moved.png").unwrap();
+        assert_eq!(thumbs(db), 0, "deleted with its image");
+
+        assert_eq!(make_thumb(b"not an image"), None);
+        assert_eq!(make_thumb(&noise_png(300, 300)), None, "already small");
     }
 
     #[test]

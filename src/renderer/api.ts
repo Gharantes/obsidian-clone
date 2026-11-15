@@ -148,7 +148,9 @@ const images = {
   rename: (path: string, newName: string): Moved => invoke('image_rename', { path, newName }),
   // Asks where to save a copy; resolves to an error message, or null.
   save: (path: string): Promise<string | null> => invoke('image_save', { path }),
-  url: (book: string, path: string) => convertFileSrc(`${book}/${path}`, 'img')
+  url: (book: string, path: string) => convertFileSrc(`${book}/${path}`, 'img'),
+  // A copy about 400px on its short side, for covers and tiles; made the first time it's shown.
+  thumb: (book: string, path: string) => `${images.url(book, path)}?thumb`
 }
 
 export const api = {

@@ -28,7 +28,7 @@ export function createDetails(initial: Book, o: DetailsOpts) {
     cover.style.setProperty('--cover', book.color)
     cover.firstElementChild!.textContent = book.title
     cover.classList.toggle('image', !!book.cover)
-    if (book.cover) cover.style.setProperty('--image', `url("${api.images.url(book.id, book.cover)}")`)
+    if (book.cover) cover.style.setProperty('--image', `url("${api.images.thumb(book.id, book.cover)}")`)
     swatches.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.title === book.color))
     removeImage.hidden = !book.cover
   }

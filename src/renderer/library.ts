@@ -92,7 +92,7 @@ function card(b: Book, covers: string[], reload: () => void, report: (e: string 
   cover.style.setProperty('--cover', b.color)
   if (b.cover) {
     cover.classList.add('image')
-    cover.style.setProperty('--image', `url("${api.images.url(b.id, b.cover)}")`)
+    cover.style.setProperty('--image', `url("${api.images.thumb(b.id, b.cover)}")`)
   }
   const meta = `${b.notes} note${b.notes === 1 ? '' : 's'} · ${ago(b.ts)}`
   const el = h('div', { class: 'book', tabIndex: 0 }, cover, h('b', { textContent: b.title }), h('small', { textContent: meta }))
@@ -297,10 +297,16 @@ export async function showLibrary(root: HTMLElement): Promise<void> {
     shelves.replaceChildren(...shelf(null, q), ...sections.flatMap((s) => shelf(s, q)))
     if (q && !shelves.childElementCount) shelves.append(h('p', { class: 'muted', textContent: 'No books match.' }))
   }
+  // What the shelves were last drawn from: reloads that change nothing (each time the window gets
+  // focus) leave the cards alone rather than building them, and their covers, again.
+  let shown = ''
   const reload = async () => {
     // Mid-drag, a reload would pull the cards out from under the pointer.
     if (dragged) return
-    ;[books, sections] = await Promise.all([api.books.list(), api.sections.list()])
+    const [b, s] = await Promise.all([api.books.list(), api.sections.list()])
+    const now = JSON.stringify([b, s])
+    if (now === shown || dragged) return
+    ;[books, sections, shown] = [b, s, now]
     render()
   }
   search.oninput = render

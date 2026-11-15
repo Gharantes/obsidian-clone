@@ -61,8 +61,13 @@ fn parse_tags(json: &serde_json::Value) -> Vec<Tag> {
 // Opens the database holding every book and note, creating its tables if needed.
 pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
     let db = Connection::open(file)?;
+    // The image server reads through connections of its own (see serve_images in main.rs): with a
+    // write-ahead log they don't wait for the app's writes, and the wait is bounded when they write.
+    db.query_row("PRAGMA journal_mode = WAL", [], |_| Ok(()))?;
+    db.busy_timeout(std::time::Duration::from_secs(10))?;
     db.execute_batch(
-        "PRAGMA foreign_keys = ON;
+        "PRAGMA synchronous = NORMAL;
+        PRAGMA foreign_keys = ON;
         -- Named groups of books in the library, in `pos` order.
         CREATE TABLE IF NOT EXISTS sections (id TEXT PRIMARY KEY, title TEXT NOT NULL, pos INTEGER NOT NULL);
         CREATE TABLE IF NOT EXISTS books (
@@ -159,6 +164,14 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
         tx.execute_batch("PRAGMA user_version = 1")?;
         tx.commit()?;
     }
+    // Scaled-down copies of images, made when first shown (see images::thumb); NULL data means the
+    // image is shown as it is. Made after the migrations above, which replace the images table.
+    db.execute_batch(
+        "CREATE TABLE IF NOT EXISTS thumbs (
+            book TEXT NOT NULL, folder TEXT NOT NULL, name TEXT NOT NULL, data BLOB, PRIMARY KEY (book, folder, name),
+            FOREIGN KEY (book, folder, name) REFERENCES images ON DELETE CASCADE ON UPDATE CASCADE
+        );",
+    )?;
     Ok(db)
 }
 

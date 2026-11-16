@@ -1,8 +1,13 @@
 # How to release
 
 The [release.yml](.github/workflows/release.yml) workflow runs when a `v*` tag is pushed to GitHub. It builds the
-Windows, Linux and macOS installers, signs the update and publishes everything in a GitHub release, along with the
-`latest.json` that the **Settings → About → Check for updates** button reads.
+Windows installers (Linux and macOS are off for now), signs the update and publishes everything in a GitHub release,
+along with the `latest.json` that the **Settings → About → Check for updates** button reads.
+
+It reuses the Rust build cache that [warm-cache.yml](.github/workflows/warm-cache.yml) saves on `main` whenever
+`src-tauri/` or `package-lock.json` change, so it only recompiles the app itself (a few minutes instead of about 8).
+Runs on tags can't share caches with each other, only with `main`. If a release is slow, check that the last
+**Warm build cache** run passed, or start one from the Actions tab.
 
 ## The automatic way
 

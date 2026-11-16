@@ -1,0 +1,40 @@
+name: Warm build cache
+
+# Builds the Windows app on main and saves the Rust build cache there, where release.yml (which runs
+# on tags) can restore it: a release then recompiles only the app, not every dependency.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src-tauri/**"
+      - "package-lock.json"
+      - ".github/workflows/warm-cache.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: warm-cache
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Same settings as release.yml, so the cache matches its build.
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          shared-key: windows
+
+      - run: npm ci
+
+      # The same release build as `tauri build`, minus the installers (which need the signing key).
+      - run: npx tauri build --no-bundle

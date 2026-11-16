@@ -447,7 +447,8 @@ pub fn rename(db: &Connection, book: &str, path: &str, new_name: &str) -> Result
     Ok(to)
 }
 
-// (folder, name, bytes) of every image.
+// (folder, name, bytes) of every image. Only tests read them all at once (export_zip goes row by row).
+#[cfg(test)]
 pub fn all(db: &Connection, book: &str) -> Result<Vec<(String, String, Vec<u8>)>, String> {
     let mut stmt = db.prepare("SELECT folder, name, data FROM images WHERE book = ?1 ORDER BY folder, name").map_err(err)?;
     let rows = stmt.query_map([book], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?))).map_err(err)?.collect::<Result<_, _>>().map_err(err);

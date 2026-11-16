@@ -2,6 +2,7 @@ import { HighlightStyle, syntaxHighlighting, syntaxTree } from '@codemirror/lang
 import type { EditorState } from '@codemirror/state'
 import { Decoration, type DecorationSet, EditorView, ViewPlugin, type ViewUpdate, WidgetType } from '@codemirror/view'
 import { tags as t } from '@lezer/highlight'
+import { ASSET_EXTS, isVideo } from './media.ts'
 
 // Syntax marks to hide, keyed by node name, with the parent elements they are hidden in.
 const HIDE: Record<string, (parent: string) => boolean> = {
@@ -12,8 +13,9 @@ const HIDE: Record<string, (parent: string) => boolean> = {
   QuoteMark: () => true
 }
 
-// Obsidian image embeds by the image's path in the Assets: ![[Maps/name.png]] or ![[name.png|alt]].
-const EMBED = /!\[\[([^\]|#]+\.(?:png|jpe?g|gif|webp))(?:\|[^\]]*)?\]\]/gi
+// Obsidian image (or video) embeds by the file's path in the Assets: ![[Maps/name.png]] or
+// ![[name.png|alt]].
+const EMBED = new RegExp(String.raw`!\[\[([^\]|#]+\.(?:${ASSET_EXTS.join('|')}))(?:\|[^\]]*)?\]\]`, 'gi')
 
 // `name` is set on image spans: the embed is shown as the image at that path.
 export type Span = { from: number; to: number; kind: 'hide' | 'quote' | 'image'; name?: string }
@@ -76,18 +78,21 @@ class ImageWidget extends WidgetType {
     return other.name === this.name
   }
   toDOM() {
-    const img = Object.assign(document.createElement('img'), { src: this.images.url(this.name), className: 'cm-embed', title: 'Ctrl+click to open in a new tab' })
+    const video = isVideo(this.name)
+    const img = Object.assign(document.createElement(video ? 'video' : 'img'), { src: this.images.url(this.name), className: 'cm-embed', title: 'Ctrl+click to open in a new tab' })
+    if (video) Object.assign(img, { controls: true, preload: 'metadata' })
     const open = (ev: MouseEvent) => {
       ev.preventDefault()
       ev.stopPropagation()
       this.images.open(this.name)
     }
-    // Keep these clicks from the editor; a plain click still goes to it, showing the embed's text.
+    // Keep these clicks from the editor; a plain click on an image still goes to it, showing the
+    // embed's text. A video keeps plain clicks for its controls.
     img.onmousedown = (ev) => {
       if (ev.button === 1 || (ev.button === 0 && (ev.ctrlKey || ev.metaKey))) {
         ev.preventDefault()
         ev.stopPropagation()
-      }
+      } else if (video) ev.stopPropagation()
     }
     img.onclick = (ev) => (ev.ctrlKey || ev.metaKey) && open(ev)
     img.onauxclick = (ev) => ev.button === 1 && open(ev)

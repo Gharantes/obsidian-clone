@@ -379,11 +379,17 @@ fn image_list(state: AppState, window: WebviewWindow) -> Result<images::Listing,
     in_book(&state, &window, images::list)?
 }
 
-// Copies image files the user picks into a folder; resolves to { paths, error }, `error` listing
-// the files that weren't added (null when all were).
+// Copies image files the user picks (and video files, with `videos`) into a folder; resolves to
+// { paths, error }, `error` listing the files that weren't added (null when all were).
 #[tauri::command]
-async fn image_import(app: AppHandle, window: WebviewWindow, folder: String) -> Result<Value, String> {
-    let picked = window.dialog().file().set_parent(&window).add_filter("Images", &["png", "jpg", "jpeg", "gif", "webp"]).blocking_pick_files().unwrap_or_default();
+async fn image_import(app: AppHandle, window: WebviewWindow, folder: String, videos: Option<bool>) -> Result<Value, String> {
+    let dialog = window.dialog().file().set_parent(&window);
+    let dialog = if videos.unwrap_or(true) {
+        dialog.add_filter("Images and videos", &images::EXTS)
+    } else {
+        dialog.add_filter("Images", &images::IMAGE_EXTS)
+    };
+    let picked = dialog.blocking_pick_files().unwrap_or_default();
     let (mut paths, mut errors) = (Vec::new(), Vec::new());
     for file in picked.into_iter().filter_map(|f| f.into_path().ok()) {
         let file_name = file.file_name().map_or(String::new(), |n| n.to_string_lossy().into_owned());
@@ -457,7 +463,7 @@ async fn image_save(app: AppHandle, window: WebviewWindow, path: String) -> Opti
     };
     let name = files::base_name(&path);
     let ext = name.rsplit_once('.').map_or("", |(_, e)| e);
-    let file = window.dialog().file().set_parent(&window).set_file_name(name).add_filter("Image", &[ext]).blocking_save_file()?.into_path().ok()?;
+    let file = window.dialog().file().set_parent(&window).set_file_name(name).add_filter(if images::is_video_name(name) { "Video" } else { "Image" }, &[ext]).blocking_save_file()?.into_path().ok()?;
     std::fs::write(file, data).err().map(|e| e.to_string())
 }
 
@@ -531,25 +537,44 @@ async fn ai_test(app: AppHandle, system: String, provider: Option<String>) -> Va
     }
 }
 
-// A request for an image: its "<book id>/<image path>", whether it's for the thumbnail, and where
-// the answer goes.
-type ImageJob = (String, bool, UriSchemeResponder);
+// A request for an image or video: its "<book id>/<path>", whether it's for the thumbnail, its
+// Range header if any, and where the answer goes.
+type ImageJob = (String, bool, Option<String>, UriSchemeResponder);
+
+// The response to an image or video request: the thumbnail, the whole file, or the part a Range
+// header asks for (videos stream that way, read from the database in parts).
+fn image_response(db: &rusqlite::Connection, path: &str, thumb: bool, range: Option<&str>) -> Option<tauri::http::Response<Vec<u8>>> {
+    let (book, name) = path.split_once('/')?;
+    let res = tauri::http::Response::builder();
+    if thumb {
+        if let Some(data) = images::thumb(db, book, name).ok().flatten() {
+            return res.header("content-type", images::kind(&data).map_or("application/octet-stream", |k| k.1)).body(data).ok();
+        }
+    }
+    let stored = images::open(db, book, name).ok().flatten()?;
+    let res = res.header("content-type", stored.mime).header("accept-ranges", "bytes");
+    let Some(range) = range else {
+        let all = if stored.len == 0 { Vec::new() } else { stored.read(0, stored.len - 1).ok()? };
+        return res.body(all).ok();
+    };
+    match images::parse_range(range, stored.len) {
+        Some((start, end)) => res
+            .status(206)
+            .header("content-range", format!("bytes {start}-{end}/{}", stored.len))
+            .body(stored.read(start, end).ok()?)
+            .ok(),
+        None => res.status(416).header("content-range", format!("bytes */{}", stored.len)).body(Vec::new()).ok(),
+    }
+}
 
 // Answers image requests on its own thread and database connection, so big images neither hold up
 // the window (the protocol handler runs on its thread) nor wait on the app's lock.
 fn serve_images(file: &Path, jobs: Arc<Mutex<mpsc::Receiver<ImageJob>>>) {
     let db = books::open_db(file).ok();
     loop {
-        let Ok((path, thumb, responder)) = jobs.lock().unwrap().recv() else { return };
-        let data = db.as_ref().zip(path.split_once('/')).and_then(|(db, (book, name))| {
-            if thumb { images::thumb(db, book, name) } else { images::get(db, book, name) }.ok().flatten()
-        });
-        let res = tauri::http::Response::builder();
-        let res = match data {
-            Some(data) => res.header("content-type", images::kind(&data).map_or("application/octet-stream", |k| k.1)).body(data),
-            None => res.status(404).body(Vec::new()),
-        };
-        responder.respond(res.unwrap());
+        let Ok((path, thumb, range, responder)) = jobs.lock().unwrap().recv() else { return };
+        let res = db.as_ref().and_then(|db| image_response(db, &path, thumb, range.as_deref()));
+        responder.respond(res.unwrap_or_else(|| tauri::http::Response::builder().status(404).body(Vec::new()).unwrap()));
     }
 }
 
@@ -572,7 +597,8 @@ fn main() {
         // ?thumb (see api.images in the renderer); serve_images answers.
         .register_asynchronous_uri_scheme_protocol("img", move |_ctx, req, responder| {
             let path = percent_encoding::percent_decode_str(req.uri().path().trim_start_matches('/')).decode_utf8_lossy().into_owned();
-            let _ = image_jobs.send((path, req.uri().query() == Some("thumb"), responder));
+            let range = req.headers().get("range").and_then(|v| v.to_str().ok()).map(String::from);
+            let _ = image_jobs.send((path, req.uri().query() == Some("thumb"), range, responder));
         })
         .setup(move |app| {
             let paths = app.path();

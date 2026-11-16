@@ -128,9 +128,10 @@ const images = {
     invoke('image_generate', { id, prompt, width, height, book }),
   // `images` are [name, folder] pairs; '' is the top level.
   list: (): Promise<{ folders: string[]; images: [string, string][] }> => invoke('image_list'),
-  // Asks for image files and copies them into the folder, renaming any whose name the folder
-  // already has; `error` lists any that weren't added.
-  import: (folder: string): Promise<{ paths: string[]; error: string | null }> => invoke('image_import', { folder }),
+  // Asks for image files (and video files, unless `videos` is false) and copies them into the
+  // folder, renaming any whose name the folder already has; `error` lists any that weren't added.
+  // Videos live with the images, under the same calls.
+  import: (folder: string, videos = true): Promise<{ paths: string[]; error: string | null }> => invoke('image_import', { folder, videos }),
   // Downloads a pixiv artwork's images (link or id) into folder/<artwork id>, skipping ones already
   // there; rejects with a message when nothing could be downloaded.
   importPixiv: (folder: string, link: string): Promise<{ paths: string[]; error: string | null }> => invoke('image_import_pixiv', { folder, link }),

@@ -34,3 +34,9 @@ test('image embeds show as images away from the cursor', () => {
   assert.deepEqual(spans(doc.length), [{ from: 4, to: 29, kind: 'image', name: 'AI image 1.jpg' }], 'only image files embed')
   assert.deepEqual(spans(10), [], 'cursor on the embed shows its text')
 })
+
+test('video and gif embeds show too', () => {
+  const doc = '![[Clips/Intro.MP4]] ![[anim.gif]] ![[a.webm|x]] ![[song.mp3]] .'
+  const names = previewSpans(EditorState.create({ doc, selection: { anchor: doc.length } })).filter((s) => s.kind === 'image').map((s) => s.name)
+  assert.deepEqual(names, ['Clips/Intro.MP4', 'anim.gif', 'a.webm'])
+})

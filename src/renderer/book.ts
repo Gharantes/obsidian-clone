@@ -7,6 +7,7 @@ import { createAssets, createGallery, pickImage } from './assets.ts'
 import { createDetails, type DetailsOpts } from './details.ts'
 import { createExplorer, find, movePath } from './explorer.ts'
 import { livePreview } from './livePreview.ts'
+import { isVideo } from './media.ts'
 import { openSettings } from './settings.ts'
 import { createTabBar, DETAILS_TAB, GALLERY_TAB, imageName, imageTab, loadTabs, nextTab, PAGE_TABS, saveTabs, TAGS_TAB } from './tabs.ts'
 import { createTags } from './tags.ts'
@@ -60,11 +61,11 @@ function textMenu(book: string) {
         { label: 'Paste', run: () => navigator.clipboard.readText().then(insert, () => {}) },
         '-',
         {
-          label: 'Insert image…',
+          label: 'Insert image or video…',
           async run() {
             // Inserted after any selected text rather than over it.
             const end = view.state.selection.main.to
-            const path = await pickImage(book, 'Insert image')
+            const path = await pickImage(book, 'Insert image or video', null, true)
             if (!path || !view.dom.isConnected) return
             const at = Math.min(end, view.state.doc.length)
             const embed = `![[${path}]]`
@@ -190,7 +191,9 @@ function createEditor(main: HTMLElement, pane: HTMLElement, book: string, o: Edi
     }
     const imagePath = imageName(path)
     if (imagePath) {
-      const img = h('img', { src: api.images.url(book, imagePath), alt: imagePath })
+      const img = isVideo(imagePath)
+        ? h('video', { src: api.images.url(book, imagePath), controls: true, autoplay: true, loop: true })
+        : h('img', { src: api.images.url(book, imagePath), alt: imagePath })
       img.oncontextmenu = (ev) => o.imageMenu(ev, imagePath)
       image = h('div', { class: 'image-view' }, img)
       pane.append(image)

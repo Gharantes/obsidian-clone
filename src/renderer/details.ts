@@ -105,7 +105,7 @@ export function createDetails(initial: Book, o: DetailsOpts) {
   })
 
   const upload = async () => {
-    const r = await api.images.import('')
+    const r = await api.images.import('', false)
     if (r.paths.length) o.imagesChanged()
     if (r.error) alert(r.error)
     if (r.paths[0]) await setCover(r.paths[0])

@@ -9,26 +9,107 @@ use tokio_util::sync::CancellationToken;
 // Images are known by their path in the Assets folders: "Maps/Map.png", or just "Map.png" at the
 // top level. Names are unique within a folder only, and notes embed images by path (![[Maps/Map.png]]).
 
-// Extension and MIME type of image bytes, or None when they aren't an image.
+// The Assets hold videos too (MP4, MOV, WebM): they live in the same table and folders as images,
+// are embedded the same way, and are served in ranges so they can stream and seek.
+
+// Extension and MIME type of image or video bytes, or None when they're neither. Only the first
+// dozen bytes are looked at.
 pub fn kind(data: &[u8]) -> Option<(&'static str, &'static str)> {
     match data {
         [0x89, b'P', b'N', b'G', ..] => Some(("png", "image/png")),
         [0xFF, 0xD8, ..] => Some(("jpg", "image/jpeg")),
         [b'G', b'I', b'F', b'8', ..] => Some(("gif", "image/gif")),
         [b'R', b'I', b'F', b'F', _, _, _, _, b'W', b'E', b'B', b'P', ..] => Some(("webp", "image/webp")),
+        // QuickTime is served as MP4, its close cousin: the webviews play H.264 .mov files that way.
+        [_, _, _, _, b'f', b't', b'y', b'p', b'q', b't', b' ', b' ', ..] => Some(("mov", "video/mp4")),
+        [_, _, _, _, b'f', b't', b'y', b'p', ..] => Some(("mp4", "video/mp4")),
+        [0x1A, 0x45, 0xDF, 0xA3, ..] => Some(("webm", "video/webm")),
         _ => None,
     }
 }
 
-// File names imported as images.
-pub fn is_image_name(name: &str) -> bool {
-    name.rsplit_once('.').is_some_and(|(_, ext)| ["png", "jpg", "jpeg", "gif", "webp"].contains(&ext.to_ascii_lowercase().as_str()))
+pub const IMAGE_EXTS: [&str; 5] = ["png", "jpg", "jpeg", "gif", "webp"];
+const VIDEO_EXTS: [&str; 4] = ["mp4", "m4v", "mov", "webm"];
+// Every extension imported into the Assets, for file dialogs.
+pub const EXTS: [&str; 9] = ["png", "jpg", "jpeg", "gif", "webp", "mp4", "m4v", "mov", "webm"];
+
+fn ext_in(name: &str, exts: &[&str]) -> bool {
+    name.rsplit_once('.').is_some_and(|(_, ext)| exts.contains(&ext.to_ascii_lowercase().as_str()))
 }
+
+// File names imported into the Assets: images and videos.
+pub fn is_image_name(name: &str) -> bool {
+    ext_in(name, &IMAGE_EXTS) || is_video_name(name)
+}
+
+pub fn is_video_name(name: &str) -> bool {
+    ext_in(name, &VIDEO_EXTS)
+}
+
+// SQLite's limit on a value's size; bigger files can't be stored.
+const MAX_BYTES: usize = 1_000_000_000;
 
 pub fn get(db: &Connection, book: &str, path: &str) -> Result<Option<Vec<u8>>, String> {
     db.query_row("SELECT data FROM images WHERE book = ?1 AND folder = ?2 AND name = ?3", params![book, parent_of(path), base_name(path)], |r| r.get(0))
         .optional()
         .map_err(err)
+}
+
+// Whether a folder has an image at `path`, without reading its bytes (videos can be big).
+pub fn exists(db: &Connection, book: &str, path: &str) -> Result<bool, String> {
+    let found = db.query_row("SELECT 1 FROM images WHERE book = ?1 AND folder = ?2 AND name = ?3", params![book, parent_of(path), base_name(path)], |_| Ok(())).optional().map_err(err)?;
+    Ok(found.is_some())
+}
+
+// An image or video opened for reading in parts, so a video streams without being read whole.
+pub struct Stored<'a> {
+    blob: rusqlite::blob::Blob<'a>,
+    pub len: u64,
+    pub mime: &'static str,
+}
+
+pub fn open<'a>(db: &'a Connection, book: &str, path: &str) -> Result<Option<Stored<'a>>, String> {
+    let rowid: Option<i64> =
+        db.query_row("SELECT rowid FROM images WHERE book = ?1 AND folder = ?2 AND name = ?3", params![book, parent_of(path), base_name(path)], |r| r.get(0)).optional().map_err(err)?;
+    let Some(rowid) = rowid else { return Ok(None) };
+    let blob = db.blob_open(rusqlite::MAIN_DB, "images", "data", rowid, true).map_err(err)?;
+    let len = blob.len() as u64;
+    let mut head = vec![0; blob.len().min(16)];
+    blob.read_at_exact(&mut head, 0).map_err(err)?;
+    let mime = kind(&head).map_or("application/octet-stream", |k| k.1);
+    Ok(Some(Stored { blob, len, mime }))
+}
+
+impl Stored<'_> {
+    // Bytes start..=end (within the value).
+    pub fn read(&self, start: u64, end: u64) -> Result<Vec<u8>, String> {
+        let mut buf = vec![0; (end - start + 1) as usize];
+        self.blob.read_at_exact(&mut buf, start as usize).map_err(err)?;
+        Ok(buf)
+    }
+}
+
+// The most bytes sent for a range that's open-ended ("bytes=1000-"); players ask for more as they go.
+pub const RANGE_CHUNK: u64 = 4 * 1024 * 1024;
+
+// The first and last byte asked for by an HTTP Range header ("bytes=0-99", "bytes=100-",
+// "bytes=-500") of a value `len` bytes long; None when it can't be served (or asks for several
+// ranges, which players don't).
+pub fn parse_range(header: &str, len: u64) -> Option<(u64, u64)> {
+    let (from, to) = header.trim().strip_prefix("bytes=")?.split_once('-')?;
+    let (from, to) = (from.trim(), to.trim());
+    if len == 0 || to.contains(',') {
+        return None;
+    }
+    let (start, end) = if from.is_empty() {
+        let n: u64 = to.parse().ok()?;
+        (len.saturating_sub(n), len - 1)
+    } else {
+        let start: u64 = from.parse().ok()?;
+        let end = if to.is_empty() { start.saturating_add(RANGE_CHUNK - 1) } else { to.parse().ok()? };
+        (start, end.min(len - 1))
+    };
+    (start <= end && start < len).then_some((start, end))
 }
 
 // Thumbnails' short side, in pixels: covers and tiles show images a few hundred pixels across.
@@ -69,6 +150,10 @@ pub fn thumb(db: &Connection, book: &str, path: &str) -> Result<Option<Vec<u8>>,
         Some(None) => return get(db, book, path),
         None => {}
     }
+    // Videos have no thumbnail: tiles show their first frame (see the renderer's assets.ts).
+    if is_video_name(&name) {
+        return Ok(None);
+    }
     let Some(data) = get(db, book, path)? else { return Ok(None) };
     if data.len() < THUMB_MIN_BYTES {
         return Ok(Some(data));
@@ -91,7 +176,7 @@ fn free_name(db: &Connection, book: &str, folder: &str, name: &str) -> Result<St
     let (stem, ext) = name.rsplit_once('.').map_or((name, String::new()), |(s, e)| (s, format!(".{e}")));
     let mut candidate = name.to_string();
     for i in 1.. {
-        if get(db, book, &join_rel(folder, &candidate))?.is_none() {
+        if !exists(db, book, &join_rel(folder, &candidate))? {
             break;
         }
         candidate = format!("{stem} {i}{ext}");
@@ -99,10 +184,15 @@ fn free_name(db: &Connection, book: &str, folder: &str, name: &str) -> Result<St
     Ok(candidate)
 }
 
-// Adds an image file's bytes to a folder under a name free there; returns the image's path.
+// Adds an image or video file's bytes to a folder under a name free there; returns its path.
 pub fn import(db: &Connection, book: &str, folder: &str, file_name: &str, data: &[u8]) -> Result<String, String> {
-    let (ext, _) = kind(data).ok_or(format!("\"{file_name}\" is not a PNG, JPEG, GIF or WebP image"))?;
-    let name = if is_image_name(file_name) { file_name.to_string() } else { format!("{file_name}.{ext}") };
+    let (ext, _) = kind(data).ok_or(format!("\"{file_name}\" is not a PNG, JPEG, GIF or WebP image, or an MP4, MOV or WebM video"))?;
+    if data.len() > MAX_BYTES {
+        return Err(format!("\"{file_name}\" is bigger than 1 GB"));
+    }
+    // A name whose extension doesn't match the bytes (a video named .png) gets the right one.
+    let video = ext == "mp4" || ext == "mov" || ext == "webm";
+    let name = if is_image_name(file_name) && is_video_name(file_name) == video { file_name.to_string() } else { format!("{file_name}.{ext}") };
     if !folder_exists(db, book, folder)? {
         return Err(format!("\"{folder}\" no longer exists"));
     }
@@ -123,7 +213,7 @@ pub fn import_into(db: &Connection, book: &str, folder: &str, sub: &str, files: 
     let mut paths = Vec::new();
     for (name, data) in files {
         let path = join_rel(&dest, name);
-        if get(db, book, &path)?.is_none() {
+        if !exists(db, book, &path)? {
             import(db, book, &dest, name, data)?;
         }
         paths.push(path);
@@ -345,7 +435,7 @@ pub fn rename(db: &Connection, book: &str, path: &str, new_name: &str) -> Result
     if new_name == name {
         return Ok(to);
     }
-    if get(db, book, &to)?.is_some() {
+    if exists(db, book, &to)? {
         return Err(format!("\"{new_name}\" already exists in this folder"));
     }
     let tx = db.unchecked_transaction().map_err(err)?;
@@ -614,6 +704,32 @@ mod tests {
         assert_eq!(kind(b"RIFF1234WEBPVP8 ").unwrap().1, "image/webp");
         assert_eq!(kind(b"<html>"), None);
         assert!(is_image_name("Map.JPG") && !is_image_name("png") && !is_image_name("note.md"));
+        assert_eq!(kind(b"\0\0\0\x20ftypisom\0\0"), Some(("mp4", "video/mp4")));
+        assert_eq!(kind(b"\0\0\0\x14ftypqt  \0\0"), Some(("mov", "video/mp4")));
+        assert_eq!(kind(b"\x1A\x45\xDF\xA3\x9F"), Some(("webm", "video/webm")));
+        assert!(is_image_name("Clip.MP4") && is_video_name("clip.webm") && !is_video_name("anim.gif"));
+    }
+
+    #[test]
+    fn videos_import_and_stream_in_ranges() {
+        let db = &crate::files::tests::test_db();
+        let mp4 = [&b"\0\0\0\x20ftypisom"[..], &[7; 100]].concat();
+        assert_eq!(import(db, "b", "", "Clip.mp4", &mp4).unwrap(), "Clip.mp4");
+        assert_eq!(import(db, "b", "", "clip.png", &mp4).unwrap(), "clip.png.mp4", "named after what it is");
+        assert_eq!(thumb(db, "b", "Clip.mp4").unwrap(), None, "no thumbnail");
+        let v = open(db, "b", "Clip.mp4").unwrap().unwrap();
+        assert_eq!((v.len, v.mime), (112, "video/mp4"));
+        assert_eq!(v.read(4, 11).unwrap(), b"ftypisom");
+        assert!(open(db, "b", "gone.mp4").unwrap().is_none());
+
+        assert_eq!(parse_range("bytes=0-99", 1000), Some((0, 99)));
+        assert_eq!(parse_range("bytes=900-", 1000), Some((900, 999)));
+        assert_eq!(parse_range("bytes=0-", 100 * RANGE_CHUNK), Some((0, RANGE_CHUNK - 1)), "open ranges come in chunks");
+        assert_eq!(parse_range("bytes=-100", 1000), Some((900, 999)));
+        assert_eq!(parse_range("bytes=500-5000", 1000), Some((500, 999)));
+        assert_eq!(parse_range("bytes=1000-", 1000), None);
+        assert_eq!(parse_range("bytes=0-1,5-6", 1000), None);
+        assert_eq!(parse_range("items=0-1", 1000), None);
 
         let ok = json!({ "data": [{ "b64_json": "iVBORw==" }] }).to_string();
         assert_eq!(parse_b64(ok.as_bytes()).unwrap(), b"\x89PNG");

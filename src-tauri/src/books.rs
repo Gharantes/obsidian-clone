@@ -458,10 +458,15 @@ pub fn export_zip(db: &Connection, id: &str, file: &Path) -> Result<(), String> 
     for folder in images::list(db, id)?.folders {
         zip.add_directory(format!("{ATTACHMENTS}/{folder}"), opts).map_err(err)?;
     }
-    for (folder, name, data) in images::all(db, id)? {
+    // One at a time, so a book with big videos isn't read into memory all at once.
+    let mut stmt = db.prepare("SELECT folder, name, data FROM images WHERE book = ?1 ORDER BY folder, name").map_err(err)?;
+    let mut rows = stmt.query([id]).map_err(err)?;
+    while let Some(row) = rows.next().map_err(err)? {
+        let (folder, name): (String, String) = (row.get(0).map_err(err)?, row.get(1).map_err(err)?);
         zip.start_file(join_rel(&join_rel(ATTACHMENTS, &folder), &name), opts).map_err(err)?;
-        zip.write_all(&data).map_err(err)?;
+        zip.write_all(row.get_ref(2).map_err(err)?.as_blob().map_err(err)?).map_err(err)?;
     }
+    drop(rows);
     for (path, text) in entries {
         match text {
             None => zip.add_directory(path, opts).map_err(err)?,

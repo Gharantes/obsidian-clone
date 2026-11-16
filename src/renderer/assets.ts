@@ -1,4 +1,5 @@
 import { movePath, parentOf } from './explorer.ts'
+import { isVideo, videoPreview } from './media.ts'
 import { imageTab } from './tabs.ts'
 import { ask, h, modal, showMenu, type MenuItem } from './ui.ts'
 
@@ -30,10 +31,15 @@ const under = (p: string, folder: string) => p === folder || p.startsWith(folder
 // An image's path (see api.images) from its name and folder.
 export const imagePath = (name: string, folder: string) => (folder ? `${folder}/${name}` : name)
 
-// Picks one of the book's images in a dialog, filtered by typing part of its path; resolves to
-// its path, or null when cancelled.
-export async function pickImage(book: string, title: string, current: string | null = null): Promise<string | null> {
-  const { images } = await api.images.list().catch(() => ({ images: [] as [string, string][] }))
+// A tile's picture of an image or video in the Assets: its thumbnail, or a video's first frame.
+const preview = (book: string, path: string) =>
+  isVideo(path) ? videoPreview(api.images.url(book, path)) : h('img', { src: api.images.thumb(book, path), alt: baseName(path), loading: 'lazy' })
+
+// Picks one of the book's images (and videos, with `videos`; covers can't be videos) in a dialog,
+// filtered by typing part of its path; resolves to its path, or null when cancelled.
+export async function pickImage(book: string, title: string, current: string | null = null, videos = false): Promise<string | null> {
+  const listed = await api.images.list().catch(() => ({ images: [] as [string, string][] }))
+  const images = listed.images.filter(([name]) => videos || !isVideo(name))
   return new Promise((resolve) => {
     let chosen: string | null = null
     const pick = (path: string) => {
@@ -42,9 +48,7 @@ export async function pickImage(book: string, title: string, current: string | n
     }
     const buttons = images.map(([name, folder]) => {
       const path = imagePath(name, folder)
-      const b = h('button', { class: path === current ? 'on' : '', title: path, onclick: () => pick(path) },
-        h('img', { src: api.images.thumb(book, path), alt: name, loading: 'lazy' })
-      )
+      const b = h('button', { class: path === current ? 'on' : '', title: path, onclick: () => pick(path) }, preview(book, path))
       b.dataset.label = path.toLowerCase()
       return b
     })
@@ -151,7 +155,7 @@ export function createAssets(o: AssetsOpts) {
     list.replaceChildren(
       ...(folders.length || images.length
         ? render('')
-        : [h('li', { class: 'muted empty-hint', textContent: 'No images yet. Add your own, or generate them with AI.' })])
+        : [h('li', { class: 'muted empty-hint', textContent: 'No images or videos yet. Add your own, or generate images with AI.' })])
     )
     mark()
   }
@@ -276,7 +280,7 @@ export function createAssets(o: AssetsOpts) {
   // Renaming also updates the notes that embed the image.
   async function rename(path: string) {
     let to: string | null = null
-    await ask('Rename image', {
+    await ask(isVideo(path) ? 'Rename video' : 'Rename image', {
       value: baseName(path),
       ok: 'Rename',
       check: async (v) => {
@@ -308,7 +312,7 @@ export function createAssets(o: AssetsOpts) {
   }
 
   const folderMenu = (path: string): MenuItem[] => [
-    { label: 'Add images…', run: () => addImages(path) },
+    { label: 'Add images or videos…', run: () => addImages(path) },
     { label: 'Add from pixiv…', run: () => addFromPixiv(path) },
     { label: 'New folder', run: () => newFolder(path) },
     '-',
@@ -328,7 +332,7 @@ export function createAssets(o: AssetsOpts) {
 
   list.oncontextmenu = (ev) =>
     showMenu(ev, [
-      { label: 'Add images…', run: () => addImages('') },
+      { label: 'Add images or videos…', run: () => addImages('') },
       { label: 'Add from pixiv…', run: () => addFromPixiv('') },
       { label: 'New folder', run: () => newFolder('') }
     ])
@@ -340,7 +344,7 @@ export function createAssets(o: AssetsOpts) {
   }
 
   const actions = h('div', { class: 'actions' },
-    h('button', { class: 'grid-view', innerHTML: GRID, title: 'Show all images in a grid', onclick: () => o.gallery() })
+    h('button', { class: 'grid-view', innerHTML: GRID, title: 'Show all images and videos in a grid', onclick: () => o.gallery() })
   )
   return { el: h('div', { class: 'panel' }, actions, list), load, select, menu }
 }
@@ -363,10 +367,7 @@ export function createGallery(book: string, o: GalleryOpts) {
 
   const tile = (name: string, folder: string) => {
     const path = imagePath(name, folder)
-    const b = h('button', { class: 'gallery-tile', title: path },
-      h('img', { src: api.images.thumb(book, path), alt: name, loading: 'lazy' }),
-      h('span', { textContent: name })
-    )
+    const b = h('button', { class: `gallery-tile${isVideo(path) ? ' video' : ''}`, title: path }, preview(book, path), h('span', { textContent: name }))
     b.dataset.label = path.toLowerCase()
     b.onclick = (ev) => o.open(imageTab(path), ev.ctrlKey || ev.metaKey)
     b.onmousedown = (ev) => {

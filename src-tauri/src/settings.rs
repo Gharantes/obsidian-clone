@@ -10,6 +10,15 @@ pub struct Settings {
     pub ai: Ai,
     pub image: Image,
     pub pixiv: Pixiv,
+    pub reddit: Reddit,
+}
+
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(default, rename_all = "camelCase")]
+pub struct Reddit {
+    // The reddit_session cookie (or a whole Cookie header) of a logged-in Reddit account; Reddit
+    // blocks logged-out downloads.
+    pub session: String,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

@@ -7,6 +7,7 @@ mod chats;
 mod files;
 mod images;
 mod pixiv;
+mod reddit;
 mod settings;
 
 use rusqlite::Connection;
@@ -329,7 +330,7 @@ const MASK: &str = "••••••••";
 // The renderer never sees the stored API keys, only whether there are any.
 fn public_settings(st: &App) -> Settings {
     let mut s = st.settings.clone();
-    let keys = s.ai.apis.values_mut().map(|a| &mut a.api_key).chain([&mut s.image.openai.api_key, &mut s.pixiv.session]);
+    let keys = s.ai.apis.values_mut().map(|a| &mut a.api_key).chain([&mut s.image.openai.api_key, &mut s.pixiv.session, &mut s.reddit.session]);
     for key in keys {
         if !key.is_empty() {
             *key = MASK.into();
@@ -355,6 +356,9 @@ fn settings_set(state: AppState, s: Settings) -> Settings {
     }
     if s.pixiv.session == MASK {
         s.pixiv.session = st.settings.pixiv.session.clone();
+    }
+    if s.reddit.session == MASK {
+        s.reddit.session = st.settings.reddit.session.clone();
     }
     st.settings = s;
     let _ = settings::save_settings(&st.dir.join("settings.json"), &st.settings);
@@ -426,6 +430,18 @@ async fn image_import_pixiv(app: AppHandle, window: WebviewWindow, folder: Strin
     }
     let paths = in_book(&app.state::<Mutex<App>>(), &window, |db, b| images::import_into(db, b, &folder, &id, &art.images))??;
     Ok(json!({ "paths": paths, "error": (!art.failed.is_empty()).then(|| art.failed.join("\n")) }))
+}
+
+// Downloads a Reddit post's images into `folder`/<post id>; resolves like image_import_pixiv.
+#[tauri::command]
+async fn image_import_reddit(app: AppHandle, window: WebviewWindow, folder: String, link: String) -> Result<Value, String> {
+    let session = app.state::<Mutex<App>>().lock().unwrap().settings.reddit.session.clone();
+    let post = reddit::download(&link, &session).await?;
+    if post.images.is_empty() {
+        return Err(post.failed.join("\n"));
+    }
+    let paths = in_book(&app.state::<Mutex<App>>(), &window, |db, b| images::import_into(db, b, &folder, &post.id, &post.images))??;
+    Ok(json!({ "paths": paths, "error": (!post.failed.is_empty()).then(|| post.failed.join("\n")) }))
 }
 
 #[tauri::command]
@@ -600,7 +616,7 @@ fn main() {
             fs_list, fs_read, fs_write, fs_rename, fs_move, fs_remove, fs_create, fs_create_note,
             chat_list, chat_get, chat_save, chat_remove,
             settings_get, settings_set,
-            ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_list, image_import, image_import_pixiv, image_remove, image_move, image_folder_create, image_folder_move, image_folder_remove, image_rename, image_save,
+            ai_generate, ai_cancel, ai_detect_claude, ai_models, ai_test, image_list, image_import, image_import_pixiv, image_import_reddit, image_remove, image_move, image_folder_create, image_folder_move, image_folder_remove, image_rename, image_save,
             image_generate
         ])
         // Serves book images at img://localhost/<book id>%2F<image path>, and their thumbnails with

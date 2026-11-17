@@ -39,6 +39,10 @@ export type Settings = {
     // PHPSESSID cookie of a logged-in account, for R-18 works; empty downloads public works only.
     session: string
   }
+  reddit: {
+    // reddit_session cookie (or a whole Cookie header) of a logged-in account; Reddit blocks logged-out downloads.
+    session: string
+  }
 }
 
 type Moved = Promise<{ path: string } | { error: string }>
@@ -138,6 +142,8 @@ const images = {
   // Downloads a pixiv artwork's images (link or id) into folder/<artwork id>, skipping ones already
   // there; rejects with a message when nothing could be downloaded.
   importPixiv: (folder: string, link: string): Promise<{ paths: string[]; error: string | null }> => invoke('image_import_pixiv', { folder, link }),
+  // Downloads a Reddit post's images (single image, gallery or inline) into folder/<post id>, like importPixiv.
+  importReddit: (folder: string, link: string): Promise<{ paths: string[]; error: string | null }> => invoke('image_import_reddit', { folder, link }),
   remove: (path: string): Promise<string | null> => invoke('image_remove', { path }),
   // Renamed "Map 1.png"... when the folder already has an image with its name.
   move: (path: string, folder: string): Moved => invoke('image_move', { path, folder }),

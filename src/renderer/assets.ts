@@ -211,16 +211,23 @@ export function createAssets(o: AssetsOpts) {
 
   // Asks for a pixiv link and downloads the artwork's images into folder/<artwork id>. The dialog
   // stays open with the error when nothing came down; pages that failed alone are listed after.
-  async function addFromPixiv(folder: string) {
+  const addFromPixiv = (folder: string) =>
+    addFromLink(folder, 'Add from pixiv', 'https://www.pixiv.net/en/artworks/141886602', 'Downloads every page of the artwork into a folder named after its id. For R-18 works, add your pixiv session in Settings → pixiv.', 'pages', api.images.importPixiv)
+
+  // Reddit: same, into folder/<post id>.
+  const addFromReddit = (folder: string) =>
+    addFromLink(folder, 'Add from Reddit', 'https://www.reddit.com/r/…/comments/1urq4lt/…', 'Downloads every image of the post (a gallery, a single image or images in its text) into a folder named after its id. Needs your Reddit session in Settings → Reddit.', 'images', api.images.importReddit)
+
+  async function addFromLink(folder: string, title: string, placeholder: string, hint: string, what: string, importer: (folder: string, link: string) => Promise<{ paths: string[]; error: string | null }>) {
     let added: { paths: string[]; error: string | null } | null = null
-    await ask('Add from pixiv', {
-      placeholder: 'https://www.pixiv.net/en/artworks/141886602',
-      hint: 'Downloads every page of the artwork into a folder named after its id. For R-18 works, add your pixiv session in Settings → pixiv.',
+    await ask(title, {
+      placeholder,
+      hint,
       ok: 'Download',
       busy: 'Downloading…',
       check: async (v) => {
         try {
-          added = await api.images.importPixiv(folder, v)
+          added = await importer(folder, v)
           return null
         } catch (e) {
           return String(e)
@@ -229,7 +236,7 @@ export function createAssets(o: AssetsOpts) {
     })
     if (!added) return
     const { paths, error } = added as { paths: string[]; error: string | null }
-    if (error) alert(`Some pages weren't downloaded:\n${error}`)
+    if (error) alert(`Some ${what} weren't downloaded:\n${error}`)
     if (paths.length) reveal(parentOf(paths[0]))
     load()
   }
@@ -314,6 +321,7 @@ export function createAssets(o: AssetsOpts) {
   const folderMenu = (path: string): MenuItem[] => [
     { label: 'Add images or videos…', run: () => addImages(path) },
     { label: 'Add from pixiv…', run: () => addFromPixiv(path) },
+    { label: 'Add from Reddit…', run: () => addFromReddit(path) },
     { label: 'New folder', run: () => newFolder(path) },
     '-',
     { label: 'Rename…', run: () => renameFolder(path) },
@@ -334,6 +342,7 @@ export function createAssets(o: AssetsOpts) {
     showMenu(ev, [
       { label: 'Add images or videos…', run: () => addImages('') },
       { label: 'Add from pixiv…', run: () => addFromPixiv('') },
+      { label: 'Add from Reddit…', run: () => addFromReddit('') },
       { label: 'New folder', run: () => newFolder('') }
     ])
   dropTarget(list, '')

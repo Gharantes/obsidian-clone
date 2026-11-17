@@ -263,6 +263,14 @@ export async function openSettings(): Promise<void> {
     h('p', { class: 'hint', textContent: "It works like your password for pixiv: it's stored only in this app's settings file and sent only to pixiv. Logging out of pixiv in the browser ends the session, and you'll need to paste a new one." })
   ]
 
+  // Reddit: the session cookie "Add from Reddit" needs, since Reddit blocks logged-out downloads.
+  const redditSession = h('input', { type: 'password', value: s.reddit.session, placeholder: 'Paste your reddit_session cookie' })
+  const redditPage = [
+    h('p', { class: 'hint', textContent: 'Reddit blocks downloads without a login. Log in at www.reddit.com in your browser (with NSFW content turned on in your Reddit preferences if you need it), open the developer tools (F12) → Application/Storage → Cookies → https://www.reddit.com, and copy the value of reddit_session.' }),
+    field('Session', redditSession),
+    h('p', { class: 'hint', textContent: "If that alone doesn't work, paste the whole Cookie header of a request to www.reddit.com (developer tools → Network) instead. It works like your password for Reddit: it's stored only in this app's settings file and sent only to Reddit. Logging out of Reddit in the browser ends the session." })
+  ]
+
   const collect = (): Settings => ({
     ...s,
     ai: {
@@ -275,7 +283,8 @@ export async function openSettings(): Promise<void> {
       openai: { baseUrl: imageUrl.value.trim(), model: imageModel.value.trim(), apiKey: imageKey.value.trim() },
       cloudflare: { accountId: cfAccount.value.trim(), apiToken: cfToken.value.trim() }
     },
-    pixiv: { session: pixivSession.value.trim() }
+    pixiv: { session: pixivSession.value.trim() },
+    reddit: { session: redditSession.value.trim() }
   })
 
   // Export: a book (the open one, in a book window) saved as a .zip of folders of .md files.
@@ -335,6 +344,7 @@ export async function openSettings(): Promise<void> {
     ['AI Writing', [claude, ...apis.map((x) => x.el)], aiHint],
     ['AI Images', [pollinations, cloudflare, imageOpenai], aiHint],
     ['pixiv', pixivPage],
+    ['Reddit', redditPage],
     ['Export', exportPage],
     ['About', aboutPage]
   ]

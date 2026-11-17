@@ -36,6 +36,8 @@ pub struct Book {
 pub struct Section {
     pub id: String,
     pub title: String,
+    // Folded in the library: only its header shows, and its covers don't load.
+    pub folded: bool,
 }
 
 #[derive(Serialize, Deserialize, Debug, PartialEq, Clone)]
@@ -115,6 +117,10 @@ pub fn open_db(file: &Path) -> rusqlite::Result<Connection> {
     // And before sections.
     if db.prepare("SELECT section FROM books LIMIT 0").is_err() {
         db.execute_batch("ALTER TABLE books ADD COLUMN section TEXT REFERENCES sections ON DELETE SET NULL")?;
+    }
+    // And before sections could be folded.
+    if db.prepare("SELECT folded FROM sections LIMIT 0").is_err() {
+        db.execute_batch("ALTER TABLE sections ADD COLUMN folded INTEGER NOT NULL DEFAULT 0")?;
     }
     // And before image folders.
     if db.prepare("SELECT folder FROM images LIMIT 0").is_err() {
@@ -281,8 +287,8 @@ pub fn reorder(db: &Connection, section: Option<&str>, ids: &[String]) -> Result
 }
 
 pub fn sections(db: &Connection) -> Result<Vec<Section>, String> {
-    let mut stmt = db.prepare("SELECT id, title FROM sections ORDER BY pos").map_err(err)?;
-    let sections = stmt.query_map([], |r| Ok(Section { id: r.get(0)?, title: r.get(1)? })).map_err(err)?.collect::<Result<_, _>>().map_err(err);
+    let mut stmt = db.prepare("SELECT id, title, folded FROM sections ORDER BY pos").map_err(err)?;
+    let sections = stmt.query_map([], |r| Ok(Section { id: r.get(0)?, title: r.get(1)?, folded: r.get(2)? })).map_err(err)?.collect::<Result<_, _>>().map_err(err);
     sections
 }
 
@@ -302,6 +308,21 @@ pub fn create_section(db: &Connection, title: &str) -> Result<String, String> {
 pub fn rename_section(db: &Connection, id: &str, title: &str) -> Result<(), String> {
     db.execute("UPDATE sections SET title = ?2 WHERE id = ?1", params![id, section_title(title)?]).map_err(err)?;
     Ok(())
+}
+
+pub fn fold_section(db: &Connection, id: &str, folded: bool) -> Result<(), String> {
+    db.execute("UPDATE sections SET folded = ?2 WHERE id = ?1", params![id, folded]).map_err(err)?;
+    Ok(())
+}
+
+// Puts the sections in this order, first to last; any left out keep their places after them.
+pub fn reorder_sections(db: &Connection, ids: &[String]) -> Result<(), String> {
+    let tx = db.unchecked_transaction().map_err(err)?;
+    tx.execute("UPDATE sections SET pos = pos + ?1", [ids.len() as i64]).map_err(err)?;
+    for (i, id) in ids.iter().enumerate() {
+        tx.execute("UPDATE sections SET pos = ?2 WHERE id = ?1", params![id, i as i64]).map_err(err)?;
+    }
+    tx.commit().map_err(err)
 }
 
 // Deletes a section; its books go back to the top of the library.
@@ -523,7 +544,12 @@ mod tests {
         let shelf = create_section(db, "Shelf").unwrap();
         let later = create_section(db, "Later").unwrap();
         rename_section(db, &shelf, " Favorites ").unwrap();
-        assert_eq!(sections(db).unwrap(), [Section { id: shelf.clone(), title: "Favorites".into() }, Section { id: later.clone(), title: "Later".into() }]);
+        assert_eq!(sections(db).unwrap(), [Section { id: shelf.clone(), title: "Favorites".into(), folded: false }, Section { id: later.clone(), title: "Later".into(), folded: false }]);
+        fold_section(db, &later, true).unwrap();
+        reorder_sections(db, &[later.clone(), shelf.clone()]).unwrap();
+        let ids = |db| sections(db).unwrap().into_iter().map(|s| (s.id, s.folded)).collect::<Vec<_>>();
+        assert_eq!(ids(db), [(later.clone(), true), (shelf.clone(), false)]);
+        assert_eq!(sections(db).unwrap().last().unwrap().id, shelf, "new sections go after the others");
         reorder(db, Some(&shelf), &[other.clone()]).unwrap();
         assert_eq!(get(db, &other).unwrap().section.as_deref(), Some(shelf.as_str()));
         assert_eq!(get(db, &id).unwrap().section, None, "other books stay where they are");

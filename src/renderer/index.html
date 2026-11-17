@@ -43,13 +43,19 @@
       .book b { margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .book small { color: var(--muted); }
       .book.dragging { opacity: 0.35; }
-      .book.ghost { position: fixed; left: 0; top: 0; z-index: 100; pointer-events: none; opacity: 0.9; }
+      .book.ghost, .section-head.ghost { position: fixed; left: 0; top: 0; z-index: 100; pointer-events: none; opacity: 0.9; }
       .book.ghost .cover { transform: rotate(2deg) scale(1.03); box-shadow: 0 8px 16px #0003, 0 24px 40px #0004; }
-      .library.dragging-book, .library.dragging-book * { user-select: none; cursor: grabbing; }
+      .library.grabbing, .library.grabbing * { user-select: none; cursor: grabbing; }
       .shelves { max-width: 1200px; margin: 0 auto; }
-      .section-head { display: flex; align-items: center; gap: 8px; margin: 40px 0 16px; padding-bottom: 6px; border-bottom: 1px solid var(--line); }
+      .section-head { display: flex; align-items: center; gap: 8px; margin: 40px 0 16px; padding-bottom: 6px; border-bottom: 1px solid var(--line); user-select: none; }
+      .section-head[title] { cursor: pointer; }
       .section-head h2 { font-size: 17px; margin: 0; }
       .section-head small { color: var(--muted); margin-right: auto; }
+      .section-head .fold { padding: 2px 6px; margin-left: -6px; transition: transform .15s; }
+      .shelf.folded .section-head .fold { transform: rotate(-90deg); }
+      .shelf.folded .section-head { margin-bottom: 0; }
+      .shelf.dragging { opacity: 0.35; }
+      .section-head.ghost { margin: 0; padding: 6px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow); box-sizing: border-box; }
       /* An empty section is a place to drop books. */
       .grid:empty { min-height: 110px; border: 2px dashed var(--line); border-radius: 10px; }
       .grid:empty::after { content: "Drag books here"; grid-column: 1 / -1; align-self: center; text-align: center; color: var(--muted); }

@@ -10,8 +10,8 @@ export type Book = { id: string; ts: number; title: string; notes: number; color
 
 export type Tag = { name: string; color: string }
 
-// A named group of books in the library.
-export type Section = { id: string; title: string }
+// A named group of books in the library; when `folded`, only its header shows in the library, and its covers don't load.
+export type Section = { id: string; title: string; folded: boolean }
 
 export type ApiConfig = { baseUrl: string; model: string; apiKey: string }
 
@@ -73,6 +73,9 @@ const sections = {
   list: (): Promise<Section[]> => invoke('section_list'),
   create: (title: string): Promise<string | null> => invoke('section_create', { title }),
   rename: (id: string, title: string): Promise<string | null> => invoke('section_rename', { id, title }),
+  fold: (id: string, folded: boolean): Promise<void> => invoke('section_fold', { id, folded }),
+  // Puts the sections in this order, first to last.
+  reorder: (ids: string[]): Promise<void> => invoke('section_reorder', { ids }),
   // Its books go back to the top of the library.
   remove: (id: string): Promise<void> => invoke('section_remove', { id })
 }
